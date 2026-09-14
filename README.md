@@ -1,31 +1,35 @@
 # Daws Folio Markdown
 
-给 Cursor 和 VS Code 用的 Markdown 编辑器。打开 `.md` 即可直接写、直接看排版，不必左右分栏预览。
+[English](#english) | [简体中文](#简体中文)
 
-扩展 ID：`dawsine.daws-folio-markdown`
+Extension ID: `dawsine.daws-folio-markdown`
 
-## 亮点
+---
 
-- **打开就是成稿。** 默认所见即所得（WYSIWYG）：标题、列表、表格、引用按排版出现，写完即是阅读效果。
-- **也可以边写边看源码。** 一键切到即时渲染（IR），源码和排版同屏，适合改语法或对稿。
-- **表格里的公式不会拆表。** 单元格里的 `$...$`、`$$...$$` 按格子单独处理，不会被整行配对美元符吃掉竖线、把列拆乱。这是写论文、笔记、计算草稿时最常见的坑，这里按单元格保护。
-- **数学即时出字。** 行内、独立公式走 KaTeX，数字旁的 `$` 也能认，不必另开预览窗。
-- **图表现画。** Mermaid 流程图、时序图当场渲染，并有独立的图表主题。
-- **按阅读来选纸面。** 正文默认 Newsprint（新闻纸：米底、衬线、随窗口伸缩）；也可跟编辑器亮暗，或选 One Dark、Nord 等。图表默认 Forest。
-- **随时回到纯文本。** 命令面板执行「Daws Folio Markdown: 切换编辑器」，在本编辑器和内置文本编辑器之间来回切，不锁死一种写法。
-- **本地和远程同一套。** `file`、`vscode-vfs`、`vscode-remote` 下的 `*.md` / `*.markdown` 都走同一 Custom Editor。
-- **只做 Markdown。** 不掺办公套件、导出流水线或云端润色，安装体积和权限都更干净。
+## English
 
-## 安装
+A WYSIWYG Markdown editor for Cursor and VS Code. Open a `.md` file and edit the page as it will look. Math in table cells (`$...$` / `$$...$$`) is handled per cell, so a dollar sign will not swallow `|` and split the table.
 
-Cursor（Open VSX）与 VS Code（Marketplace）：
+### Features
+
+- **Open as a finished page:** WYSIWYG by default. Headings, lists, tables, and quotes show as they render.
+- **Instant rendering:** Switch to IR when you want source and layout on the same screen.
+- **Tables keep their columns:** `$...$` and `$$...$$` inside a cell stay in that cell. Pairing `$` across a whole row is what usually breaks tables; this path does not do that.
+- **Math:** KaTeX for inline and display formulas. `$` next to a digit is accepted.
+- **Diagrams:** Mermaid flowcharts and sequence diagrams render in place. Diagram theme is separate from the page theme.
+- **Themes:** Default page theme is Newsprint (cream, serif, scales with the window). Or follow the editor light/dark theme, or pick One Dark / Nord / etc. Diagrams default to Forest.
+- **Back to plain text:** Command Palette → `Daws Folio Markdown: 切换编辑器` to jump between this editor and the built-in text editor.
+- **Local and remote:** Same editor for `file`, `vscode-vfs`, and `vscode-remote` on `*.md` / `*.markdown`.
+- **Markdown only:** No office suite, export pipeline, or cloud rewrite.
+
+### Install
 
 ```bash
 cursor --install-extension dawsine.daws-folio-markdown
 code --install-extension dawsine.daws-folio-markdown
 ```
 
-装好后打开任意 Markdown 即可。若仍被内置编辑器抢走，在用户或工作区 `settings.json` 里指定：
+If another editor still takes `.md`, set this in user or workspace `settings.json`:
 
 ```json
 {
@@ -36,23 +40,61 @@ code --install-extension dawsine.daws-folio-markdown
 }
 ```
 
-## 设置
+---
 
-前缀均为 `dawsFolioMarkdown.*`：
+## 简体中文
 
-| 键 | 取值 | 默认 |
+给 Cursor / VS Code 用的 Markdown 所见即所得编辑器。打开 `.md` 就能直接改排好的页面。表格单元格里的 `$...$` / `$$...$$` 按格子处理，美元符不会把 `|` 吃掉、把列拆开。
+
+### 功能
+
+- **打开就是成稿：** 默认所见即所得。标题、列表、表格、引用按最终样子显示。
+- **即时渲染：** 需要看源码时切到 IR，源码和排版同一屏。
+- **表格公式不拆列：** 单元格里的 `$...$`、`$$...$$` 只在这一格里处理。整行配对 `$` 容易把竖线吃进公式，这里不会。
+- **公式：** KaTeX 渲染行内和独立公式。数字旁边的 `$` 也能认。
+- **图表：** Mermaid 流程图、时序图直接画出来。图表主题和正文主题分开设。
+- **主题：** 正文默认 Newsprint（米底、衬线、随窗口伸缩）。也可以跟编辑器亮暗走，或选 One Dark、Nord 等。图表默认 Forest。
+- **切回文本：** 命令面板执行「Daws Folio Markdown: 切换编辑器」，和内置文本编辑器来回切。
+- **本地和远程：** `file`、`vscode-vfs`、`vscode-remote` 下的 `*.md` / `*.markdown` 都是这一个编辑器。
+- **只做 Markdown：** 没有办公套件、导出、云端改写。
+
+### 安装
+
+```bash
+cursor --install-extension dawsine.daws-folio-markdown
+code --install-extension dawsine.daws-folio-markdown
+```
+
+如果还是被别的编辑器抢走，在用户或工作区 `settings.json` 里写：
+
+```json
+{
+  "workbench.editorAssociations": {
+    "*.md": "dawsine.folioMarkdown",
+    "*.markdown": "dawsine.folioMarkdown"
+  }
+}
+```
+
+---
+
+## Settings / 设置
+
+Prefix: `dawsFolioMarkdown.*`
+
+| Key | Values | Default |
 | --- | --- | --- |
 | `dawsFolioMarkdown.editMode` | `wysiwyg` \| `ir` | `wysiwyg` |
-| `dawsFolioMarkdown.editorTheme` | Newsprint、Auto、Light、One Dark 等 | `Newsprint` |
-| `dawsFolioMarkdown.mermaidTheme` | Forest、Auto、Light、Dark 等 | `Forest` |
+| `dawsFolioMarkdown.editorTheme` | Newsprint, Auto, Light, One Dark, … | `Newsprint` |
+| `dawsFolioMarkdown.mermaidTheme` | Forest, Auto, Light, Dark, … | `Forest` |
 
-## 从源码安装
+## Build from source / 从源码安装
 
 ```bash
 npm install
 npm run compile
 npx @vscode/vsce package
-cursor --install-extension ./daws-folio-markdown-0.1.1.vsix --force
+cursor --install-extension ./daws-folio-markdown-0.1.2.vsix --force
 ```
 
-开发可用 `npm run watch`。表格公式单测：`npm test`。
+`npm run watch` while developing. Table-math tests: `npm test`.

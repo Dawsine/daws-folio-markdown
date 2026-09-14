@@ -1,8 +1,8 @@
 {
 	"name": "daws-folio-markdown",
 	"displayName": "Daws Folio Markdown",
-	"description": "所见即所得的 Markdown 编辑器。表格单元格里的 $...$ / $$...$$ 不会拆乱表格。",
-	"version": "0.1.1",
+	"description": "WYSIWYG Markdown editor. Math in table cells won't break columns. / 所见即所得。表格里的公式不会拆列。",
+	"version": "0.1.2",
 	"publisher": "dawsine",
 	"license": "MIT",
 	"icon": "images/icon.png",
