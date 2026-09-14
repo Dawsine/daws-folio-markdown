@@ -322,6 +322,87 @@
     }
   }
 
+  function encodeMathSource(source) {
+    var utf8 = unescape(encodeURIComponent(String(source || "")));
+    var b64 = btoa(utf8)
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/g, "");
+    return "%%M:" + b64 + "%%";
+  }
+
+  function wrapInlineTex(tex, display) {
+    var source = String(tex || "").trim();
+    if (!source) return "";
+    if (source.charAt(0) === "$" && source.charAt(source.length - 1) === "$") {
+      if (display && source.charAt(1) !== "$") return "$$" + source.slice(1, -1) + "$$";
+      return source;
+    }
+    return display ? "$$" + source + "$$" : "$" + source + "$";
+  }
+
+  function annotationTex(math) {
+    if (!math || !math.querySelectorAll) return "";
+    var anns = math.querySelectorAll("annotation");
+    var i;
+    for (i = 0; i < anns.length; i++) {
+      if (String(anns[i].getAttribute("encoding") || "").toLowerCase() === "application/x-tex") {
+        return stripZwsp(anns[i].textContent || "").trim();
+      }
+    }
+    return "";
+  }
+
+  function replaceNodeWithToken(node, source) {
+    if (!node || !node.parentNode || !source) return;
+    node.parentNode.replaceChild(document.createTextNode(encodeMathSource(source)), node);
+  }
+
+  function restoreMathInClone(root) {
+    if (!root || !root.querySelectorAll) return;
+    var leftover = root.querySelectorAll("[data-leftover-math][data-math-source]");
+    var i;
+    for (i = leftover.length - 1; i >= 0; i--) {
+      replaceNodeWithToken(leftover[i], leftover[i].getAttribute("data-math-source") || "");
+    }
+    var maths = root.querySelectorAll("math");
+    for (i = maths.length - 1; i >= 0; i--) {
+      var math = maths[i];
+      if (math.closest && math.closest("[data-type='math-inline'], [data-type='math-block']")) continue;
+      var tex = annotationTex(math);
+      if (!tex) continue;
+      var display = math.getAttribute("display") === "block" || !!(math.closest && math.closest(".katex-display"));
+      var host = (math.closest && math.closest(".katex")) || math;
+      replaceNodeWithToken(host, wrapInlineTex(tex, display));
+    }
+  }
+
+  function htmlWithMathSources(html) {
+    var text = String(html == null ? "" : html);
+    if (!/(leftover-math|katex|<math|data-math-source)/i.test(text)) return text;
+    var wrap = document.createElement("div");
+    wrap.innerHTML = text;
+    restoreMathInClone(wrap);
+    return wrap.innerHTML;
+  }
+
+  function hookLuteSerializers() {
+    var lute = editor && editor.vditor && editor.vditor.lute;
+    if (!lute || lute.__dawsMathHooked) return;
+    lute.__dawsMathHooked = true;
+    var names = ["SpinVditorDOM", "VditorDOM2Md", "VditorIRDOM2Md", "SpinVditorIRDOM", "HTML2Md"];
+    var i;
+    for (i = 0; i < names.length; i++) {
+      (function (method) {
+        if (typeof lute[method] !== "function") return;
+        var orig = lute[method].bind(lute);
+        lute[method] = function (html) {
+          return orig(htmlWithMathSources(html));
+        };
+      })(names[i]);
+    }
+  }
+
   function stripMathDelimiters(source) {
     if (source.startsWith("$$") && source.endsWith("$$")) return { tex: source.slice(2, -2), display: true };
     if (source.startsWith("$") && source.endsWith("$")) return { tex: source.slice(1, -1), display: false };
@@ -342,19 +423,38 @@
 
   function createMathSpan(source, katex) {
     var parsed = stripMathDelimiters(source);
-    var span = document.createElement("span");
-    span.setAttribute("data-leftover-math", "1");
-    span.setAttribute("data-math-source", source);
+    var wrap = document.createElement("span");
+    wrap.className = "vditor-wysiwyg__block";
+    wrap.setAttribute("data-type", "math-inline");
+    wrap.setAttribute("data-daws-math-source", source);
+    var code = document.createElement("code");
+    code.style.display = "none";
+    code.textContent = "\u200b" + parsed.tex;
+    var preview = document.createElement("span");
+    preview.className = "vditor-wysiwyg__preview";
+    preview.setAttribute("data-render", "2");
+    preview.setAttribute("contenteditable", "false");
+    var math = document.createElement("span");
+    math.className = "language-math";
+    math.setAttribute("data-math", parsed.tex);
     try {
-      span.innerHTML = katex.renderToString(parsed.tex, {
-        displayMode: parsed.display,
-        throwOnError: false,
-        strict: false,
-      });
+      if (katex) {
+        math.innerHTML = katex.renderToString(parsed.tex, {
+          displayMode: parsed.display,
+          output: "html",
+          throwOnError: false,
+          strict: false,
+        });
+      } else {
+        math.textContent = parsed.tex;
+      }
     } catch (err) {
-      span.textContent = source;
+      math.textContent = parsed.tex;
     }
-    return span;
+    preview.appendChild(math);
+    wrap.appendChild(code);
+    wrap.appendChild(preview);
+    return wrap;
   }
 
   function nextMathMatch(text, from) {
@@ -422,22 +522,159 @@
     cell.appendChild(frag);
   }
 
+  function selectionTouches(el) {
+    if (!el) return false;
+    var sel = document.getSelection();
+    if (!sel || sel.rangeCount === 0) return false;
+    try {
+      var range = sel.getRangeAt(0);
+      if (el.contains(range.commonAncestorContainer)) return true;
+      if (typeof range.intersectsNode === "function" && range.intersectsNode(el)) return true;
+    } catch (err) {
+      return false;
+    }
+    return false;
+  }
+
+  function appendCellSource(node, parts) {
+    if (!node) return;
+    if (node.nodeType === Node.TEXT_NODE) {
+      if (!isSkippedMathParent(node.parentElement)) {
+        parts.push(stripZwsp(node.nodeValue || ""));
+      }
+      return;
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) return;
+    if (node.getAttribute && node.getAttribute("data-leftover-math")) {
+      parts.push(node.getAttribute("data-math-source") || "");
+      return;
+    }
+    if (node.getAttribute && node.getAttribute("data-daws-math-source") && node.getAttribute("data-type") === "math-inline") {
+      parts.push(node.getAttribute("data-daws-math-source") || "");
+      return;
+    }
+    var type = node.getAttribute && node.getAttribute("data-type");
+    if (type === "math-inline" || type === "math-block") {
+      var code = node.querySelector ? node.querySelector("code") : null;
+      parts.push(wrapInlineTex(stripZwsp((code && code.textContent) || ""), type === "math-block"));
+      return;
+    }
+    if (node.matches && node.matches(SKIP_MATH_CLOSEST)) return;
+    var child = node.firstChild;
+    while (child) {
+      appendCellSource(child, parts);
+      child = child.nextSibling;
+    }
+  }
+
+  function cellPlainSource(cell) {
+    var parts = [];
+    var child = cell.firstChild;
+    while (child) {
+      appendCellSource(child, parts);
+      child = child.nextSibling;
+    }
+    return parts.join("");
+  }
+
+  function tableMathCode(wrap) {
+    return wrap && wrap.firstElementChild && wrap.firstElementChild.tagName === "CODE" ? wrap.firstElementChild : null;
+  }
+
+  function tableMathPreview(wrap) {
+    return wrap ? wrap.querySelector(".vditor-wysiwyg__preview") : null;
+  }
+
+  function beginEditTableMath(wrap) {
+    var code = tableMathCode(wrap);
+    var preview = tableMathPreview(wrap);
+    if (!code || !preview) return;
+    var tex = stripZwsp(code.textContent || "");
+    var source = wrap.getAttribute("data-daws-math-source") || "";
+    if (!tex && source) tex = stripMathDelimiters(source).tex;
+    code.textContent = tex;
+    wrap.setAttribute("data-daws-math-editing", "1");
+    code.style.display = "inline";
+    preview.style.display = "none";
+    var range = document.createRange();
+    if (code.firstChild) {
+      range.selectNodeContents(code);
+      range.collapse(false);
+    } else {
+      range.setStart(code, 0);
+      range.collapse(true);
+    }
+    var sel = document.getSelection();
+    if (sel) {
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+  }
+
+  function finishEditTableMath(wrap, katex) {
+    if (!wrap || !wrap.getAttribute("data-daws-math-editing")) return;
+    var code = tableMathCode(wrap);
+    var typed = stripZwsp(code ? code.textContent : "").trim();
+    wrap.removeAttribute("data-daws-math-editing");
+    if (!typed) {
+      if (wrap.parentNode) wrap.parentNode.removeChild(wrap);
+      return;
+    }
+    var source = typed.charAt(0) === "$" ? typed : wrapInlineTex(typed, false);
+    if (!wrap.parentNode) return;
+    wrap.parentNode.replaceChild(createMathSpan(source, katex || window.katex), wrap);
+  }
+
+  function finishOpenTableMath(root, katex, keep) {
+    var opens = (root || document).querySelectorAll("[data-daws-math-editing]");
+    var i;
+    for (i = 0; i < opens.length; i++) {
+      if (keep && keep.contains(opens[i])) continue;
+      finishEditTableMath(opens[i], katex);
+    }
+  }
+
+  function bindTableMathEditing() {
+    var root = document.getElementById("vditor");
+    if (!root || root.getAttribute("data-daws-math-edit") === "1") return;
+    root.setAttribute("data-daws-math-edit", "1");
+    root.addEventListener(
+      "mousedown",
+      function (event) {
+        var target = event.target;
+        if (!target || !target.closest) return;
+        var preview = target.closest("td .vditor-wysiwyg__preview, th .vditor-wysiwyg__preview");
+        var wrap = preview && preview.closest("[data-type='math-inline']");
+        finishOpenTableMath(root, window.katex, wrap);
+        if (!wrap || !wrap.closest(CELL_SELECTOR)) return;
+        event.preventDefault();
+        beginEditTableMath(wrap);
+      },
+      true,
+    );
+  }
+
   function renderMathInCell(cell, katex) {
     if (!cell || cell.tagName === "TR" || cell.tagName === "TABLE") return;
+    if (cell.querySelector("[data-daws-math-editing]")) return;
+    if (selectionTouches(cell)) return;
     var nodes = collectSafeTextNodes(cell);
     var joined = "";
     var i;
-    if (!nodes.length) {
-      joined = stripZwsp(cell.textContent || "");
-      if (!hasMathPlaceholder(joined) && !joined.includes("$")) return;
-      replaceCellPhrasing(cell, fragmentFromMathText(joined, katex));
-      return;
-    }
     for (i = 0; i < nodes.length; i++) {
       joined += stripZwsp(nodes[i].nodeValue);
     }
-    if (hasMathPlaceholder(joined)) {
+    var painted = cell.querySelectorAll("[data-leftover-math], [data-type='math-inline'], [data-type='math-block']");
+    if (painted.length && !hasMathPlaceholder(joined) && joined.indexOf("$") === -1) return;
+    if (!nodes.length) {
+      if (painted.length) return;
+      joined = stripZwsp(cell.textContent || "");
+      if (!hasMathPlaceholder(joined) && joined.indexOf("$") === -1) return;
       replaceCellPhrasing(cell, fragmentFromMathText(joined, katex));
+      return;
+    }
+    if (hasMathPlaceholder(joined) || (painted.length && joined.indexOf("$") !== -1)) {
+      replaceCellPhrasing(cell, fragmentFromMathText(cellPlainSource(cell), katex));
       return;
     }
     for (i = 0; i < nodes.length; i++) {
@@ -449,19 +686,48 @@
     for (i = 0; i < nodes.length; i++) {
       joined += stripZwsp(nodes[i].nodeValue);
     }
-    if (!joined.includes("$")) return;
+    if (joined.indexOf("$") === -1) return;
     INLINE_MATH_RE.lastIndex = 0;
     if (!INLINE_MATH_RE.test(joined)) return;
-    replaceCellPhrasing(cell, fragmentFromMathText(joined, katex));
+    replaceCellPhrasing(cell, fragmentFromMathText(cellPlainSource(cell), katex));
+  }
+
+  function upgradeForeignMathInTables(root, katex) {
+    if (!root || !root.querySelectorAll) return;
+    var cells = root.querySelectorAll(CELL_SELECTOR);
+    var i;
+    var j;
+    for (i = 0; i < cells.length; i++) {
+      if (cells[i].querySelector("[data-daws-math-editing]")) continue;
+      var leftovers = cells[i].querySelectorAll("[data-leftover-math][data-math-source]");
+      for (j = leftovers.length - 1; j >= 0; j--) {
+        var old = leftovers[j];
+        if (!old.parentNode) continue;
+        old.parentNode.replaceChild(createMathSpan(old.getAttribute("data-math-source") || "", katex), old);
+      }
+      var maths = cells[i].querySelectorAll("math");
+      for (j = maths.length - 1; j >= 0; j--) {
+        var math = maths[j];
+        if (math.closest && math.closest("[data-type='math-inline'], [data-type='math-block']")) continue;
+        var tex = annotationTex(math);
+        if (!tex) continue;
+        var host = (math.closest && math.closest(".katex")) || math;
+        if (!host.parentNode) continue;
+        var display = math.getAttribute("display") === "block" || !!(math.closest && math.closest(".katex-display"));
+        host.parentNode.replaceChild(createMathSpan(wrapInlineTex(tex, display), katex), host);
+      }
+    }
   }
 
   /**
    * Leftover `$...$` only. Pairing is node-local, or cell-local inside tables.
+   * Table cells use Vditor native math-inline (source in <code>), never leftover KaTeX.
    * Never run /\$...\$/ against a table row's innerText.
    */
   function renderLeftoverInlineMath(root) {
     var katex = window.katex;
     if (!katex || !root) return;
+    upgradeForeignMathInTables(root, katex);
     if (root.tagName === "TR" || root.tagName === "TABLE") {
       var forcedCells = root.querySelectorAll(CELL_SELECTOR);
       for (var c = 0; c < forcedCells.length; c++) {
@@ -496,6 +762,7 @@
     var root = document.getElementById("vditor");
     if (!root || mathObserved) return;
     mathObserved = true;
+    bindTableMathEditing();
     new MutationObserver(scheduleLeftoverMath).observe(root, {
       childList: true,
       subtree: true,
@@ -586,7 +853,7 @@
     for (i = 0; i < spans.length; i++) {
       var span = spans[i];
       if (!span.parentNode) continue;
-      var text = document.createTextNode(span.getAttribute("data-math-source") || "");
+      var text = document.createTextNode(encodeMathSource(span.getAttribute("data-math-source") || ""));
       backup.push([span, text]);
       span.parentNode.replaceChild(text, span);
     }
@@ -709,9 +976,11 @@
 
   function scheduleSave() {
     if (applyingRemote || !editor) return;
+    hookLuteSerializers();
     window.clearTimeout(saveTimer);
     saveTimer = window.setTimeout(function () {
       if (applyingRemote || !editor) return;
+      hookLuteSerializers();
       var content = withSerializableDom(function () {
         return editor.getValue();
       });
@@ -789,6 +1058,8 @@
         scheduleSave();
       },
       after: function () {
+        hookLuteSerializers();
+        bindTableMathEditing();
         observeIcons();
         paintVditorIcons();
         observeMermaidHook();

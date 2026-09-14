@@ -185,8 +185,39 @@ export function protectMathInTables(markdown: string): string {
   return protectAndList(markdown).text;
 }
 
+const LEAKED_MATHML_RE =
+  /<math\b[^>]*>[\s\S]*?<annotation\b[^>]*\bencoding\s*=\s*(["'])application\/x-tex\1[^>]*>([\s\S]*?)<\/annotation>[\s\S]*?<\/math>/gi;
+
+function unescapeXml(text: string): string {
+  return text
+    .replace(/&nbsp;/g, " ")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, "&")
+    .replace(/\u00a0/g, " ");
+}
+
+function wrapLeakedTex(tex: string): string {
+  const source = unescapeXml(tex).trim();
+  if (!source) return "";
+  if (source.startsWith("$$") && source.endsWith("$$")) return source;
+  if (source.startsWith("$") && source.endsWith("$")) return source;
+  return `$${source}$`;
+}
+
+/** KaTeX MathML leaked into Markdown after a WYSIWYG table edit. */
+export function stripLeakedKatexMath(markdown: string): string {
+  return markdown.replace(LEAKED_MATHML_RE, (_all, _quote, tex) => {
+    return wrapLeakedTex(String(tex ?? ""));
+  });
+}
+
 export function restoreMathInTables(markdown: string): string {
-  return markdown
-    .replace(TOKEN_RE, (token) => decodeMathToken(token) ?? token)
-    .replace(/(?<!@)M:([A-Za-z0-9_-]{10,})(?!@)/g, (token) => decodeMathToken(token) ?? token);
+  return stripLeakedKatexMath(
+    markdown
+      .replace(TOKEN_RE, (token) => decodeMathToken(token) ?? token)
+      .replace(/(?<!@)M:([A-Za-z0-9_-]{10,})(?!@)/g, (token) => decodeMathToken(token) ?? token),
+  );
 }

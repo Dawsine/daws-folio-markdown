@@ -257,6 +257,32 @@ body {
   display: inline;
 }
 
+#vditor td .vditor-wysiwyg__block[data-type="math-inline"],
+#vditor th .vditor-wysiwyg__block[data-type="math-inline"] {
+  display: inline;
+}
+
+#vditor td .vditor-wysiwyg__block[data-type="math-inline"] > .vditor-wysiwyg__preview,
+#vditor th .vditor-wysiwyg__block[data-type="math-inline"] > .vditor-wysiwyg__preview {
+  cursor: text;
+}
+
+#vditor [data-daws-math-editing] > code {
+  display: inline !important;
+  padding: 0 0.15em;
+  font-family: var(--daws-font-family-editor, ui-monospace, monospace);
+}
+
+#vditor [data-daws-math-editing] > code::before,
+#vditor [data-daws-math-editing] > code::after {
+  content: "$";
+  opacity: 0.45;
+}
+
+#vditor [data-daws-math-editing] > .vditor-wysiwyg__preview {
+  display: none !important;
+}
+
 #vditor .vditor-wysiwyg__block[data-type="math-block"],
 #vditor .vditor-reset .language-math,
 #vditor .vditor-reset .language-mermaid,

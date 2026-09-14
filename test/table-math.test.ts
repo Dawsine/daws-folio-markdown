@@ -4,6 +4,7 @@ import {
   protectAndList,
   protectMathInTables,
   restoreMathInTables,
+  stripLeakedKatexMath,
 } from "../src/tableMath.ts";
 
 const APPENDIX_B_ROW =
@@ -111,5 +112,26 @@ describe("protectMathInTables", () => {
   it("does not protect pipe rows inside fenced code", () => {
     const fenced = "```\n| $O$ | $x$ |\n```";
     assert.equal(protectMathInTables(fenced), fenced);
+  });
+});
+
+describe("stripLeakedKatexMath", () => {
+  it("turns a leaked KaTeX MathML cell back into $U$", () => {
+    const leaked =
+      '| <math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>U</mi></mrow><annotation encoding="application/x-tex">U</annotation></semantics></math> | 输入 |';
+    assert.equal(stripLeakedKatexMath(leaked).includes("<math"), false);
+    const restored = restoreMathInTables(leaked);
+    assert.equal(gfmCells(restored).length, 2);
+    assert.match(restored, /\| \$U\$ \| 输入 \|/);
+    assert.equal(restored.includes("<math"), false);
+  });
+
+  it("restores a mixed cell with leaked display-scale tex", () => {
+    const leaked =
+      '缺陷史 <math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>1.0915</mn></mrow><annotation encoding="application/x-tex">1.0915\\times10^{5}</annotation></semantics></math> s';
+    assert.equal(
+      restoreMathInTables(leaked),
+      "缺陷史 $1.0915\\times10^{5}$ s",
+    );
   });
 });
