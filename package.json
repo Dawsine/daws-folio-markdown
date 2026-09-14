@@ -1,8 +1,8 @@
 {
 	"name": "daws-folio-markdown",
 	"displayName": "Daws Folio Markdown",
-	"description": "WYSIWYG / instant-rendering Markdown editor. Table-cell $...$ and $$...$$ stay intact and do not split columns.",
-	"version": "0.1.0",
+	"description": "所见即所得的 Markdown 编辑器。表格单元格里的 $...$ / $$...$$ 不会拆乱表格。",
+	"version": "0.1.1",
 	"publisher": "dawsine",
 	"license": "MIT",
 	"icon": "images/icon.png",

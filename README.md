@@ -1,65 +1,31 @@
 # Daws Folio Markdown
 
+给 Cursor 和 VS Code 用的 Markdown 编辑器。打开 `.md` 即可直接写、直接看排版，不必左右分栏预览。
+
 扩展 ID：`dawsine.daws-folio-markdown`
 
-自研 Cursor / VS Code 扩展：只做 Markdown 所见即所得（WYSIWYG）与即时渲染（IR）。**不要拷贝 `cweijan.vscode-office`（Office Viewer）的源码、打包 `dist/`、魔改 Vditor/Lute 或 Pro 逻辑。** 实现走官方 `vditor` / `katex`，表格单元格里的 `$...$` / `$$...$$` 由 `src/tableMath.ts` 在进出编辑器时保护与还原，避免整行配对美元符把 `|` 吃进公式、把表拆乱。
+## 亮点
 
-商店安装（Cursor 走 Open VSX，VS Code 走 Marketplace）：
+- **打开就是成稿。** 默认所见即所得（WYSIWYG）：标题、列表、表格、引用按排版出现，写完即是阅读效果。
+- **也可以边写边看源码。** 一键切到即时渲染（IR），源码和排版同屏，适合改语法或对稿。
+- **表格里的公式不会拆表。** 单元格里的 `$...$`、`$$...$$` 按格子单独处理，不会被整行配对美元符吃掉竖线、把列拆乱。这是写论文、笔记、计算草稿时最常见的坑，这里按单元格保护。
+- **数学即时出字。** 行内、独立公式走 KaTeX，数字旁的 `$` 也能认，不必另开预览窗。
+- **图表现画。** Mermaid 流程图、时序图当场渲染，并有独立的图表主题。
+- **按阅读来选纸面。** 正文默认 Newsprint（新闻纸：米底、衬线、随窗口伸缩）；也可跟编辑器亮暗，或选 One Dark、Nord 等。图表默认 Forest。
+- **随时回到纯文本。** 命令面板执行「Daws Folio Markdown: 切换编辑器」，在本编辑器和内置文本编辑器之间来回切，不锁死一种写法。
+- **本地和远程同一套。** `file`、`vscode-vfs`、`vscode-remote` 下的 `*.md` / `*.markdown` 都走同一 Custom Editor。
+- **只做 Markdown。** 不掺办公套件、导出流水线或云端润色，安装体积和权限都更干净。
+
+## 安装
+
+Cursor（Open VSX）与 VS Code（Marketplace）：
 
 ```bash
 cursor --install-extension dawsine.daws-folio-markdown
 code --install-extension dawsine.daws-folio-markdown
 ```
 
-Custom Editor 的 `viewType` 为 `dawsine.folioMarkdown`，覆盖 `file` / `vscode-vfs` / `vscode-remote` 下的 `*.md` 与 `*.markdown`。
-
-## 安装依赖与编译
-
-在本仓库根目录：
-
-```bash
-npm install
-npm run compile
-```
-
-开发时可用 `npm run watch`。表格公式单测：`npm test`（`test/*.test.ts`）。
-
-## 用 `cursor --install-extension` 安装
-
-先打 VSIX（需已 `npm run compile`）：
-
-```bash
-npx @vscode/vsce package --allow-missing-repository
-cursor --install-extension ./daws-folio-markdown-0.1.0.vsix --force
-```
-
-若本机命令是 `code` 而不是 `cursor`，把上面的 `cursor` 换成 `code` 即可。不要加 `--no-dependencies`：webview 要带上 `vditor` / `katex`。
-
-## 用 F5 调试
-
-1. 用 Cursor / VS Code 打开本仓库根目录（`daws-folio-markdown`）。
-2. 在 `.vscode/launch.json` 增加 Extension Development Host 配置（本仓库不预置该文件）：
-
-```json
-{
-  "version": "0.2.0",
-  "configurations": [
-    {
-      "name": "Run Extension",
-      "type": "extensionHost",
-      "request": "launch",
-      "args": ["--extensionDevelopmentPath=${workspaceFolder}"]
-    }
-  ]
-}
-```
-
-3. 先 `npm install`，再按 **F5**。新窗口里打开任意 `.md`，应走本 Custom Editor。
-4. Webview 页面是 `media/editor.html`，脚本是 `media/editor.js`（由 webview 侧实现，不要从 Office Viewer 拷）。
-
-## 把本扩展设为 `*.md` 默认编辑器
-
-`package.json` 里该 Custom Editor 的 `priority` 已是 `default`。若仍被内置文本编辑器或其它 Markdown 扩展抢走，在用户或工作区 `settings.json` 写入：
+装好后打开任意 Markdown 即可。若仍被内置编辑器抢走，在用户或工作区 `settings.json` 里指定：
 
 ```json
 {
@@ -69,10 +35,6 @@ cursor --install-extension ./daws-folio-markdown-0.1.0.vsix --force
   }
 }
 ```
-
-命令面板执行 **「Daws Folio Markdown: 切换编辑器」**（`dawsFolioMarkdown.switchEditor`）可在默认文本编辑器与本 Custom Editor 之间来回切换。
-
-若同时装着 Office Viewer，请先关掉它对 Markdown 的关联，或用上面的 `editorAssociations` 强制指定本扩展。
 
 ## 设置
 
@@ -84,6 +46,13 @@ cursor --install-extension ./daws-folio-markdown-0.1.0.vsix --force
 | `dawsFolioMarkdown.editorTheme` | Newsprint、Auto、Light、One Dark 等 | `Newsprint` |
 | `dawsFolioMarkdown.mermaidTheme` | Forest、Auto、Light、Dark 等 | `Forest` |
 
-## 表格公式
+## 从源码安装
 
-进编辑器（`open` / `update`）前调用 `protectMathInTables`，把单元格内公式换成不含 `$`、`|`、`@` 的占位符 `%%M:…%%`；存盘（`save`）前调用 `restoreMathInTables` 还原。旧的 `@@M:…@@` / `‹M:…›` 仍能解码。算法只在 `src/tableMath.ts`，宿主不得另写一套。
+```bash
+npm install
+npm run compile
+npx @vscode/vsce package
+cursor --install-extension ./daws-folio-markdown-0.1.1.vsix --force
+```
+
+开发可用 `npm run watch`。表格公式单测：`npm test`。
