@@ -45,9 +45,7 @@ If another editor still takes `.md`, set this in user or workspace `settings.jso
 
 ## 简体中文
 
-面向 Cursor / VS Code 用户的 Markdown 所见即所得编辑器。主要实现了我自己在使用其他插件过程中发现的不满足的需求：
-
-表格单元格里的 `$...$` / `$$...$$` 按格子处理，美元符不会把 `|` 吃掉、把列拆开。
+面向 Cursor / VS Code 用户的 Markdown 所见即所得编辑器。主要实现了我自己在使用其他插件过程中发现的需求：
 
 ### 功能
 
