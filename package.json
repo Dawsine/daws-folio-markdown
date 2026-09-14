@@ -2,7 +2,7 @@
 	"name": "daws-folio-markdown",
 	"displayName": "Daws Folio Markdown",
 	"description": "WYSIWYG Markdown editor. Math in table cells won't break columns. / 所见即所得。表格里的公式不会拆列。",
-	"version": "0.1.7",
+	"version": "0.1.9",
 	"publisher": "dawsine",
 	"license": "MIT",
 	"icon": "images/icon.png",
@@ -88,19 +88,19 @@
 				"command": "dawsFolioMarkdown.cut",
 				"key": "ctrl+x",
 				"mac": "cmd+x",
-				"when": "dawsFolioMarkdown.focus || activeCustomEditorId == 'dawsine.folioMarkdown'"
+				"when": "activeCustomEditorId == 'dawsine.folioMarkdown' && !inputFocus && !textInputFocus"
 			},
 			{
 				"command": "dawsFolioMarkdown.copy",
 				"key": "ctrl+c",
 				"mac": "cmd+c",
-				"when": "dawsFolioMarkdown.focus || activeCustomEditorId == 'dawsine.folioMarkdown'"
+				"when": "activeCustomEditorId == 'dawsine.folioMarkdown' && !inputFocus && !textInputFocus"
 			},
 			{
 				"command": "dawsFolioMarkdown.paste",
 				"key": "ctrl+v",
 				"mac": "cmd+v",
-				"when": "dawsFolioMarkdown.focus || activeCustomEditorId == 'dawsine.folioMarkdown'"
+				"when": "activeCustomEditorId == 'dawsine.folioMarkdown' && !inputFocus && !textInputFocus"
 			}
 		],
 		"menus": {
@@ -122,17 +122,17 @@
 				{
 					"command": "dawsFolioMarkdown.cut",
 					"group": "9_cutcopypaste@1",
-					"when": "dawsFolioMarkdown.focus || activeCustomEditorId == 'dawsine.folioMarkdown'"
+					"when": "activeCustomEditorId == 'dawsine.folioMarkdown'"
 				},
 				{
 					"command": "dawsFolioMarkdown.copy",
 					"group": "9_cutcopypaste@2",
-					"when": "dawsFolioMarkdown.focus || activeCustomEditorId == 'dawsine.folioMarkdown'"
+					"when": "activeCustomEditorId == 'dawsine.folioMarkdown'"
 				},
 				{
 					"command": "dawsFolioMarkdown.paste",
 					"group": "9_cutcopypaste@3",
-					"when": "dawsFolioMarkdown.focus || activeCustomEditorId == 'dawsine.folioMarkdown'"
+					"when": "activeCustomEditorId == 'dawsine.folioMarkdown'"
 				}
 			]
 		},

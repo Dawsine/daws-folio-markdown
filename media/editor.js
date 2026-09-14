@@ -57,6 +57,7 @@
   var XLINK_NS = "http://www.w3.org/1999/xlink";
   var documentBaseUrl = "";
   var workspaceBaseUrl = "";
+  var documentFileName = "";
 
   function normalizeMarkdown(value) {
     return String(value == null ? "" : value).replace(/\r\n/g, "\n");
@@ -1044,6 +1045,7 @@
       toolbar: TOOLBAR,
       toolbarConfig: { pin: true },
       icon: "ant",
+      link: { isOpen: false },
       preview: {
         maxWidth: 100000,
         theme: { current: theme === "dark" ? "dark" : "light" },
@@ -1069,6 +1071,7 @@
         observeLeftoverMath();
         observeImages();
         rewriteAllImages(document.getElementById("vditor"));
+        bindLinkFollow();
         if (pendingUpdate != null) {
           var queued = pendingUpdate;
           pendingUpdate = null;
@@ -1154,11 +1157,91 @@
     true,
   );
 
+  function splitHref(href) {
+    var text = String(href || "").trim();
+    var hashAt = text.indexOf("#");
+    if (hashAt < 0) return { path: text, hash: "" };
+    return { path: text.slice(0, hashAt), hash: text.slice(hashAt + 1) };
+  }
+
+  function headingSlug(text) {
+    return String(text || "")
+      .toLowerCase()
+      .replace(/\s+/g, "-")
+      .replace(/[^\w\u4e00-\u9fff-]/g, "");
+  }
+
+  function isSameDocumentPath(path) {
+    if (!path || path === "." || path === "./") return true;
+    var name = path.replace(/\\/g, "/").split("/").pop() || "";
+    try {
+      name = decodeURIComponent(name);
+    } catch (err) {
+      /* keep */
+    }
+    return name === documentFileName;
+  }
+
+  function scrollToHash(hash) {
+    if (!hash) return;
+    var id = hash;
+    try {
+      id = decodeURIComponent(hash);
+    } catch (err) {
+      id = hash;
+    }
+    var el = document.getElementById(id);
+    var root = document.getElementById("vditor");
+    if (!el && root) {
+      var heads = root.querySelectorAll("h1, h2, h3, h4, h5, h6");
+      var i;
+      for (i = 0; i < heads.length; i++) {
+        var title = (heads[i].textContent || "").replace(/\s+/g, " ").trim();
+        if (title === id || headingSlug(title) === id || heads[i].id === id) {
+          el = heads[i];
+          break;
+        }
+      }
+    }
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: "start" });
+  }
+
+  function followHref(href) {
+    var text = String(href || "").trim();
+    if (!text || /^(javascript|vbscript|data):/i.test(text)) return;
+    var parts = splitHref(text);
+    if (text.charAt(0) === "#" || isSameDocumentPath(parts.path)) {
+      scrollToHash(parts.hash);
+      return;
+    }
+    vscode.postMessage({ type: "openLink", payload: { href: text } });
+  }
+
+  function bindLinkFollow() {
+    var root = document.getElementById("vditor");
+    if (!root || root.getAttribute("data-daws-link-follow") === "1") return;
+    root.setAttribute("data-daws-link-follow", "1");
+    root.addEventListener(
+      "click",
+      function (event) {
+        if (!(event.metaKey || event.ctrlKey) || event.button !== 0) return;
+        var target = event.target;
+        var a = target && target.closest ? target.closest("a[href]") : null;
+        if (!a || !root.contains(a)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        followHref(a.getAttribute("href") || "");
+      },
+      true,
+    );
+  }
+
   function handleOpen(payload) {
     var content = payload && payload.content != null ? payload.content : "";
     var config = (payload && payload.config) || {};
     documentBaseUrl = (payload && payload.documentBaseUrl) || "";
     workspaceBaseUrl = (payload && payload.workspaceBaseUrl) || "";
+    documentFileName = (payload && payload.fileName) || "";
     applyChrome(config);
     if (editor) {
       editorThemeSetting = config.editorTheme || editorThemeSetting;
@@ -1166,6 +1249,7 @@
       applyTheme(editor, editorThemeSetting);
       applyUpdate(content);
       rewriteAllImages(document.getElementById("vditor"));
+      bindLinkFollow();
       return;
     }
     initVditor(content, config, payload);

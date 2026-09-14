@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { isBlockedLink, isExternalLink, splitLinkHref } from './linkHref';
 import { protectMathInTables, restoreMathInTables } from './tableMath';
 
 export const VIEW_TYPE = 'dawsine.folioMarkdown';
@@ -105,6 +106,10 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
 			}
 			if (type === 'clipboardNeed') {
 				void this.sendClipboard('paste', webviewPanel.webview);
+				return;
+			}
+			if (type === 'openLink') {
+				void this.openLink(document, readHref(message));
 			}
 		});
 
@@ -156,6 +161,44 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
 		}
 		const first = this.panels.values().next().value as vscode.WebviewPanel | undefined;
 		return first?.webview;
+	}
+
+	private async openLink(document: vscode.TextDocument, href: string | undefined): Promise<void> {
+		const raw = String(href ?? '').trim();
+		if (!raw || isBlockedLink(raw)) {
+			return;
+		}
+		if (isExternalLink(raw)) {
+			await vscode.env.openExternal(vscode.Uri.parse(raw));
+			return;
+		}
+
+		const { path: pathPart } = splitLinkHref(raw);
+		if (!pathPart) {
+			return;
+		}
+
+		if (/^(file|vscode-remote|vscode-vfs):/i.test(pathPart)) {
+			await vscode.commands.executeCommand('vscode.open', vscode.Uri.parse(pathPart));
+			return;
+		}
+
+		let rel: string;
+		try {
+			rel = decodeURIComponent(pathPart);
+		} catch {
+			rel = pathPart;
+		}
+		rel = rel.replace(/\\/g, '/');
+
+		const folder = vscode.workspace.getWorkspaceFolder(document.uri);
+		const target = rel.startsWith('/')
+			? folder
+				? vscode.Uri.joinPath(folder.uri, rel.replace(/^\/+/, ''))
+				: vscode.Uri.joinPath(document.uri, '..', rel)
+			: vscode.Uri.joinPath(document.uri, '..', rel);
+
+		await vscode.commands.executeCommand('vscode.open', target);
 	}
 
 	public async sendClipboard(action: 'cut' | 'copy' | 'paste', webview = this.targetWebview()): Promise<void> {
@@ -251,8 +294,8 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
 		const katexJs = webview
 			.asWebviewUri(vscode.Uri.joinPath(vditorDir, 'dist', 'js', 'katex', 'katex.min.js'))
 			.toString();
-		const editorCss = cacheBust(webview.asWebviewUri(vscode.Uri.joinPath(mediaDir, 'editor.css')).toString(), '0.1.7');
-		const scriptUri = cacheBust(webview.asWebviewUri(vscode.Uri.joinPath(mediaDir, 'editor.js')).toString(), '0.1.7');
+		const editorCss = cacheBust(webview.asWebviewUri(vscode.Uri.joinPath(mediaDir, 'editor.css')).toString(), '0.1.9');
+		const scriptUri = cacheBust(webview.asWebviewUri(vscode.Uri.joinPath(mediaDir, 'editor.js')).toString(), '0.1.9');
 		const mediaRoot = webview.asWebviewUri(mediaDir).toString();
 		const vditorRoot = webview.asWebviewUri(vditorDir).toString();
 		const cspSource = webview.cspSource;
@@ -329,6 +372,21 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 function readMessageType(message: unknown): string | undefined {
 	const record = asRecord(message);
 	return typeof record?.type === 'string' ? record.type : undefined;
+}
+
+function readHref(message: unknown): string | undefined {
+	const record = asRecord(message);
+	if (!record) {
+		return undefined;
+	}
+	const payload = asRecord(record.payload);
+	if (typeof payload?.href === 'string') {
+		return payload.href;
+	}
+	if (typeof record.href === 'string') {
+		return record.href;
+	}
+	return undefined;
 }
 
 function readClipboardText(message: unknown): string | undefined {
