@@ -2,7 +2,7 @@
 	"name": "daws-folio-markdown",
 	"displayName": "Daws Folio Markdown",
 	"description": "WYSIWYG Markdown editor. Math in table cells won't break columns. / 所见即所得，公式不会炸表格",
-	"version": "0.1.11",
+	"version": "0.1.12",
 	"publisher": "dawsine",
 	"license": "MIT",
 	"icon": "images/icon.png",
