@@ -9,6 +9,7 @@ docs/**
 tsconfig.json
 AGENTS.md
 .github/**
+scripts/**
 **/.DS_Store
 **/._*
 **/*.vsix

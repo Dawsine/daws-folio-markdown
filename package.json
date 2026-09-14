@@ -124,7 +124,8 @@
 		"vscode:prepublish": "npm run compile",
 		"compile": "tsc -p .",
 		"watch": "tsc -p . --watch",
-		"test": "node --import tsx --test test/*.test.ts"
+		"test": "node --import tsx --test test/*.test.ts",
+		"publish:stores": "bash scripts/publish.sh"
 	},
 	"dependencies": {
 		"katex": "^0.16.22",
