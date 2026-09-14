@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="daws-theme-newsprint">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="{{csp}}" />
+  <!--
+    The extension host must replace these placeholders with asWebviewUri().
+    If they are still visible, map them as follows (relative paths will not
+    load in the webview until asWebviewUri is applied):
+
+      {{VDITOR_CSS}}   → node_modules/vditor/dist/index.css
+      {{VDITOR_JS}}    → node_modules/vditor/dist/index.js
+      {{VDITOR_ICONS}}   → node_modules/vditor/dist/js/icons/ant.js
+      {{VDITOR_MERMAID}} → node_modules/vditor/dist/js/mermaid/mermaid.min.js
+      {{KATEX_CSS}}      → node_modules/vditor/dist/js/katex/katex.min.css
+      {{KATEX_JS}}       → node_modules/vditor/dist/js/katex/katex.min.js
+      {{EDITOR_CSS}}   → media/editor.css
+      {{EDITOR_JS}}    → media/editor.js
+
+    Icon script must stay a real src= tag (id=vditorIconScript).
+    Vditor's addScriptSync injects inline JS, which webview CSP blocks.
+  -->
+  <link rel="stylesheet" href="{{VDITOR_CSS}}" />
+  <link rel="stylesheet" href="{{KATEX_CSS}}" />
+  <link rel="stylesheet" href="{{EDITOR_CSS}}" />
+</head>
+<body>
+  <script src="{{VDITOR_ICONS}}" id="vditorIconScript"></script>
+  <script src="{{VDITOR_MERMAID}}" id="vditorMermaidScript"></script>
+  <script src="{{KATEX_JS}}" id="vditorKatexScript"></script>
+  <div id="vditor"></div>
+  <script src="{{VDITOR_JS}}"></script>
+  <script src="{{EDITOR_JS}}"></script>
+</body>
+</html>

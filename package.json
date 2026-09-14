@@ -1,0 +1,139 @@
+{
+	"name": "daws-folio-markdown",
+	"displayName": "Daws Folio Markdown",
+	"description": "WYSIWYG / instant-rendering Markdown editor. Table-cell $...$ and $$...$$ stay intact and do not split columns.",
+	"version": "0.1.0",
+	"publisher": "dawsine",
+	"license": "MIT",
+	"icon": "images/icon.png",
+	"galleryBanner": {
+		"color": "#F3EDE1",
+		"theme": "light"
+	},
+	"keywords": [
+		"markdown",
+		"wysiwyg",
+		"katex",
+		"mermaid",
+		"math"
+	],
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/Dawsine/daws-folio-markdown.git"
+	},
+	"bugs": {
+		"url": "https://github.com/Dawsine/daws-folio-markdown/issues"
+	},
+	"homepage": "https://github.com/Dawsine/daws-folio-markdown#readme",
+	"engines": {
+		"vscode": "^1.90.0"
+	},
+	"categories": [
+		"Other"
+	],
+	"activationEvents": [
+		"onStartupFinished",
+		"onCustomEditor:dawsine.folioMarkdown",
+		"onCommand:dawsFolioMarkdown.switchEditor"
+	],
+	"main": "./out/extension.js",
+	"contributes": {
+		"customEditors": [
+			{
+				"viewType": "dawsine.folioMarkdown",
+				"displayName": "Daws Folio Markdown",
+				"priority": "default",
+				"selector": [
+					{
+						"filenamePattern": "file:/**/*.md"
+					},
+					{
+						"filenamePattern": "file:/**/*.markdown"
+					},
+					{
+						"filenamePattern": "vscode-vfs:/**/*.md"
+					},
+					{
+						"filenamePattern": "vscode-vfs:/**/*.markdown"
+					},
+					{
+						"filenamePattern": "vscode-remote:/**/*.md"
+					},
+					{
+						"filenamePattern": "vscode-remote:/**/*.markdown"
+					}
+				]
+			}
+		],
+		"commands": [
+			{
+				"command": "dawsFolioMarkdown.switchEditor",
+				"title": "Daws Folio Markdown: 切换编辑器"
+			}
+		],
+		"configuration": {
+			"title": "Daws Folio Markdown",
+			"properties": {
+				"dawsFolioMarkdown.editMode": {
+					"type": "string",
+					"enum": [
+						"wysiwyg",
+						"ir"
+					],
+					"default": "wysiwyg",
+					"markdownDescription": "默认编辑模式：`wysiwyg` 所见即所得，`ir` 即时渲染。"
+				},
+				"dawsFolioMarkdown.editorTheme": {
+					"type": "string",
+					"enum": [
+						"Newsprint",
+						"Auto",
+						"Light",
+						"Solarized",
+						"Warm Light",
+						"Dim Light",
+						"One Dark",
+						"Github Dark",
+						"Nord",
+						"Monokai",
+						"Dracula"
+					],
+					"default": "Newsprint",
+					"markdownDescription": "Markdown 正文主题。默认 `Newsprint`（Typora 新闻纸：米底、衬线、随窗口伸缩）。`Auto` 跟随 Cursor / VS Code 亮暗。"
+				},
+				"dawsFolioMarkdown.mermaidTheme": {
+					"type": "string",
+					"enum": [
+						"Auto",
+						"Light",
+						"Forest",
+						"Ocean",
+						"Sunset",
+						"Dark",
+						"Dracula",
+						"Monokai",
+						"Nord"
+					],
+					"default": "Forest",
+					"markdownDescription": "Mermaid 图表主题。默认 `Forest`（绿色）。`Auto` 跟随编辑器亮暗。"
+				}
+			}
+		}
+	},
+	"scripts": {
+		"vscode:prepublish": "npm run compile",
+		"compile": "tsc -p .",
+		"watch": "tsc -p . --watch",
+		"test": "node --import tsx --test test/*.test.ts"
+	},
+	"dependencies": {
+		"katex": "^0.16.22",
+		"vditor": "^3.11.1"
+	},
+	"devDependencies": {
+		"@types/node": "^22.15.3",
+		"@types/vscode": "^1.90.0",
+		"tsx": "^4.19.4",
+		"typescript": "^5.8.3"
+	}
+}
