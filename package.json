@@ -2,7 +2,7 @@
 	"name": "daws-folio-markdown",
 	"displayName": "Daws Folio Markdown",
 	"description": "WYSIWYG Markdown editor. Math in table cells won't break columns. / 所见即所得。表格里的公式不会拆列。",
-	"version": "0.1.5",
+	"version": "0.1.7",
 	"publisher": "dawsine",
 	"license": "MIT",
 	"icon": "images/icon.png",
@@ -69,8 +69,73 @@
 			{
 				"command": "dawsFolioMarkdown.switchEditor",
 				"title": "Daws Folio Markdown: 切换编辑器"
+			},
+			{
+				"command": "dawsFolioMarkdown.cut",
+				"title": "Daws Folio Markdown: 剪切"
+			},
+			{
+				"command": "dawsFolioMarkdown.copy",
+				"title": "Daws Folio Markdown: 复制"
+			},
+			{
+				"command": "dawsFolioMarkdown.paste",
+				"title": "Daws Folio Markdown: 粘贴"
 			}
 		],
+		"keybindings": [
+			{
+				"command": "dawsFolioMarkdown.cut",
+				"key": "ctrl+x",
+				"mac": "cmd+x",
+				"when": "dawsFolioMarkdown.focus || activeCustomEditorId == 'dawsine.folioMarkdown'"
+			},
+			{
+				"command": "dawsFolioMarkdown.copy",
+				"key": "ctrl+c",
+				"mac": "cmd+c",
+				"when": "dawsFolioMarkdown.focus || activeCustomEditorId == 'dawsine.folioMarkdown'"
+			},
+			{
+				"command": "dawsFolioMarkdown.paste",
+				"key": "ctrl+v",
+				"mac": "cmd+v",
+				"when": "dawsFolioMarkdown.focus || activeCustomEditorId == 'dawsine.folioMarkdown'"
+			}
+		],
+		"menus": {
+			"commandPalette": [
+				{
+					"command": "dawsFolioMarkdown.cut",
+					"when": "false"
+				},
+				{
+					"command": "dawsFolioMarkdown.copy",
+					"when": "false"
+				},
+				{
+					"command": "dawsFolioMarkdown.paste",
+					"when": "false"
+				}
+			],
+			"webview/context": [
+				{
+					"command": "dawsFolioMarkdown.cut",
+					"group": "9_cutcopypaste@1",
+					"when": "dawsFolioMarkdown.focus || activeCustomEditorId == 'dawsine.folioMarkdown'"
+				},
+				{
+					"command": "dawsFolioMarkdown.copy",
+					"group": "9_cutcopypaste@2",
+					"when": "dawsFolioMarkdown.focus || activeCustomEditorId == 'dawsine.folioMarkdown'"
+				},
+				{
+					"command": "dawsFolioMarkdown.paste",
+					"group": "9_cutcopypaste@3",
+					"when": "dawsFolioMarkdown.focus || activeCustomEditorId == 'dawsine.folioMarkdown'"
+				}
+			]
+		},
 		"configuration": {
 			"title": "Daws Folio Markdown",
 			"properties": {

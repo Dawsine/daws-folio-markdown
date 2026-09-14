@@ -1080,6 +1080,80 @@
     editor = new VditorCtor("vditor", options);
   }
 
+  function selectedPlainText() {
+    var sel = window.getSelection();
+    return sel ? sel.toString() : "";
+  }
+
+  function selectionIsCollapsed() {
+    var sel = window.getSelection();
+    return !sel || sel.rangeCount === 0 || sel.isCollapsed;
+  }
+
+  function notifyEditorChanged() {
+    var root = document.querySelector("#vditor .vditor-reset") || document.getElementById("vditor");
+    if (root) {
+      root.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteByCut" }));
+    }
+    scheduleSave();
+  }
+
+  function deleteSelection() {
+    if (selectionIsCollapsed()) return false;
+    if (document.execCommand("delete")) return true;
+    var sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return false;
+    sel.getRangeAt(0).deleteContents();
+    sel.collapseToStart();
+    return true;
+  }
+
+  function runClipboard(action, text) {
+    if (action === "paste") {
+      if (typeof text === "string") {
+        document.execCommand("insertText", false, text);
+      }
+      notifyEditorChanged();
+      return;
+    }
+    if (selectionIsCollapsed() && action === "cut") return;
+    vscode.postMessage({ type: "clipboardWrite", payload: { text: selectedPlainText() } });
+    if (action === "cut") {
+      deleteSelection();
+      notifyEditorChanged();
+    }
+  }
+
+  function isModKey(event) {
+    return event.metaKey || event.ctrlKey;
+  }
+
+  document.addEventListener(
+    "keydown",
+    function (event) {
+      if (!isModKey(event) || event.altKey || event.shiftKey) return;
+      var key = String(event.key || "").toLowerCase();
+      if (key === "x") {
+        event.preventDefault();
+        event.stopPropagation();
+        runClipboard("cut");
+        return;
+      }
+      if (key === "c") {
+        event.preventDefault();
+        event.stopPropagation();
+        runClipboard("copy");
+        return;
+      }
+      if (key === "v") {
+        event.preventDefault();
+        event.stopPropagation();
+        vscode.postMessage({ type: "clipboardNeed", payload: { action: "paste" } });
+      }
+    },
+    true,
+  );
+
   function handleOpen(payload) {
     var content = payload && payload.content != null ? payload.content : "";
     var config = (payload && payload.config) || {};
@@ -1106,6 +1180,10 @@
     }
     if (msg.type === "update") {
       applyUpdate(payload.content);
+      return;
+    }
+    if (msg.type === "clipboard") {
+      runClipboard(payload.action, payload.text);
     }
   });
 

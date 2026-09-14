@@ -1,6 +1,6 @@
 # 003　Reload / 重装扩展后无法打开 .md（AssertionFailed）
 
-**状态：** 本仓库已改回文本编辑器打开；Folio 用「切换编辑器」进入  
+**状态：** 用户要求本仓库仍默认 Folio；不要用工作区 `default` 覆盖  
 **报告人：** 用户（2026-09-14）  
 **出现版本：** 0.1.4 安装并 Reload 之后  
 **文件：** `02-systematic-answers.zh-CN.md`
@@ -28,8 +28,6 @@
 
 ## 处理
 
-1. 本课题仓库 `.vscode/settings.json` 把 `*.md` / `*.markdown` 设为 `default`（覆盖用户级 Folio 关联）。
-2. 关掉报错框和卡住的标签，再打开该文件，应是普通文本编辑器。
-3. 要所见即所得：命令面板「Daws Folio Markdown: 切换编辑器」。切换前会先 `openTextDocument`，避免空模型。
+扩展侧：命令「切换编辑器」会先 `openTextDocument`，再 `openWith` Folio，避免空模型。
 
-用户级 `settings.json` 里的 Folio 关联未改。其他文件夹仍会默认走 Folio。
+不要在课题仓库用 `workbench.editorAssociations: "*.md" = default` 盖掉 Folio。用户级已绑 `dawsine.folioMarkdown`。重装/Reload 时先关掉 Folio 标签，避免工作区恢复时再踩空文档。

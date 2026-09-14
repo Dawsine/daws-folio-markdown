@@ -34,15 +34,22 @@ interface HostToWebviewUpdate {
 
 export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
 	private readonly lastPosted = new Map<string, string>();
+	private readonly panels = new Set<vscode.WebviewPanel>();
+	private focused: vscode.WebviewPanel | undefined;
 
 	public static register(context: vscode.ExtensionContext): vscode.Disposable {
 		const provider = new MarkdownEditorProvider(context);
-		return vscode.window.registerCustomEditorProvider(VIEW_TYPE, provider, {
-			webviewOptions: {
-				retainContextWhenHidden: true,
-			},
-			supportsMultipleEditorsPerDocument: false,
-		});
+		return vscode.Disposable.from(
+			vscode.window.registerCustomEditorProvider(VIEW_TYPE, provider, {
+				webviewOptions: {
+					retainContextWhenHidden: true,
+				},
+				supportsMultipleEditorsPerDocument: false,
+			}),
+			vscode.commands.registerCommand('dawsFolioMarkdown.cut', () => provider.sendClipboard('cut')),
+			vscode.commands.registerCommand('dawsFolioMarkdown.copy', () => provider.sendClipboard('copy')),
+			vscode.commands.registerCommand('dawsFolioMarkdown.paste', () => provider.sendClipboard('paste')),
+		);
 	}
 
 	private constructor(private readonly context: vscode.ExtensionContext) {}
@@ -52,6 +59,8 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
 		webviewPanel: vscode.WebviewPanel,
 		_token: vscode.CancellationToken,
 	): Promise<void> {
+		this.panels.add(webviewPanel);
+		this.rememberFocus(webviewPanel);
 		webviewPanel.webview.options = {
 			enableScripts: true,
 			localResourceRoots: this.localResourceRoots(document),
@@ -85,6 +94,17 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
 					return;
 				}
 				void this.writeDocument(document, raw);
+				return;
+			}
+			if (type === 'clipboardWrite') {
+				const text = readClipboardText(message);
+				if (typeof text === 'string') {
+					void vscode.env.clipboard.writeText(text);
+				}
+				return;
+			}
+			if (type === 'clipboardNeed') {
+				void this.sendClipboard('paste', webviewPanel.webview);
 			}
 		});
 
@@ -95,12 +115,55 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
 			this.postOpen(webviewPanel.webview, document);
 		});
 
+		const stateSub = webviewPanel.onDidChangeViewState(() => {
+			this.rememberFocus(webviewPanel);
+		});
+
 		webviewPanel.onDidDispose(() => {
 			changeSub.dispose();
 			messageSub.dispose();
 			configSub.dispose();
+			stateSub.dispose();
+			this.panels.delete(webviewPanel);
+			if (this.focused === webviewPanel) {
+				this.focused = undefined;
+			}
 			this.lastPosted.delete(docKey);
+			this.refreshFocusContext();
 		});
+	}
+
+	private rememberFocus(panel: vscode.WebviewPanel): void {
+		if (panel.active) {
+			this.focused = panel;
+		}
+		this.refreshFocusContext();
+	}
+
+	private refreshFocusContext(): void {
+		const on = this.focused != null && this.panels.has(this.focused) && this.focused.visible;
+		void vscode.commands.executeCommand('setContext', 'dawsFolioMarkdown.focus', on);
+	}
+
+	private targetWebview(): vscode.Webview | undefined {
+		if (this.focused && this.panels.has(this.focused)) {
+			return this.focused.webview;
+		}
+		for (const panel of this.panels) {
+			if (panel.visible) {
+				return panel.webview;
+			}
+		}
+		const first = this.panels.values().next().value as vscode.WebviewPanel | undefined;
+		return first?.webview;
+	}
+
+	public async sendClipboard(action: 'cut' | 'copy' | 'paste', webview = this.targetWebview()): Promise<void> {
+		if (!webview) {
+			return;
+		}
+		const text = action === 'paste' ? await vscode.env.clipboard.readText() : undefined;
+		void webview.postMessage({ type: 'clipboard', payload: { action, text } });
 	}
 
 	private postOpen(webview: vscode.Webview, document: vscode.TextDocument): void {
@@ -188,8 +251,8 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
 		const katexJs = webview
 			.asWebviewUri(vscode.Uri.joinPath(vditorDir, 'dist', 'js', 'katex', 'katex.min.js'))
 			.toString();
-		const editorCss = cacheBust(webview.asWebviewUri(vscode.Uri.joinPath(mediaDir, 'editor.css')).toString(), '0.1.5');
-		const scriptUri = cacheBust(webview.asWebviewUri(vscode.Uri.joinPath(mediaDir, 'editor.js')).toString(), '0.1.5');
+		const editorCss = cacheBust(webview.asWebviewUri(vscode.Uri.joinPath(mediaDir, 'editor.css')).toString(), '0.1.7');
+		const scriptUri = cacheBust(webview.asWebviewUri(vscode.Uri.joinPath(mediaDir, 'editor.js')).toString(), '0.1.7');
 		const mediaRoot = webview.asWebviewUri(mediaDir).toString();
 		const vditorRoot = webview.asWebviewUri(vditorDir).toString();
 		const cspSource = webview.cspSource;
@@ -266,6 +329,21 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 function readMessageType(message: unknown): string | undefined {
 	const record = asRecord(message);
 	return typeof record?.type === 'string' ? record.type : undefined;
+}
+
+function readClipboardText(message: unknown): string | undefined {
+	const record = asRecord(message);
+	if (!record) {
+		return undefined;
+	}
+	const payload = asRecord(record.payload);
+	if (typeof payload?.text === 'string') {
+		return payload.text;
+	}
+	if (typeof record.text === 'string') {
+		return record.text;
+	}
+	return undefined;
 }
 
 function readSaveContent(message: unknown): string | undefined {

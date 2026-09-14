@@ -12,15 +12,16 @@ A WYSIWYG Markdown editor for Cursor and VS Code. Open a `.md` file and edit the
 
 ### Features
 
-- **Open as a finished page:** WYSIWYG by default. Headings, lists, tables, and quotes show as they render.
-- **Instant rendering:** Switch to IR when you want source and layout on the same screen.
-- **Tables keep their columns:** `$...$` and `$$...$$` inside a cell stay in that cell. Pairing `$` across a whole row is what usually breaks tables; this path does not do that.
-- **Math:** KaTeX for inline and display formulas. `$` next to a digit is accepted.
-- **Diagrams:** Mermaid flowcharts and sequence diagrams render in place. Diagram theme is separate from the page theme.
-- **Themes:** Default page theme is Newsprint (cream, serif, scales with the window). Or follow the editor light/dark theme, or pick One Dark / Nord / etc. Diagrams default to Forest.
-- **Back to plain text:** Command Palette → `Daws Folio Markdown: 切换编辑器` to jump between this editor and the built-in text editor.
-- **Local and remote:** Same editor for `file`, `vscode-vfs`, and `vscode-remote` on `*.md` / `*.markdown`.
-- **Markdown only:** No office suite, export pipeline, or cloud rewrite.
+- **Open as a finished page (0.1.0):** WYSIWYG by default. Headings, lists, tables, and quotes show as they render.
+- **Instant rendering (0.1.0):** Switch to IR when you want source and layout on the same screen.
+- **Tables keep their columns (0.1.5):** `$...$` and `$$...$$` inside a cell stay in that cell. Pairing `$` across a whole row is what usually breaks tables; this path does not do that.
+- **Math (0.1.0):** KaTeX for inline and display formulas. `$` next to a digit is accepted.
+- **Diagrams (0.1.0):** Mermaid flowcharts and sequence diagrams render in place. Diagram theme is separate from the page theme.
+- **Adaptive width (0.1.0):** Page content (text, math, images) follows the editor window width.
+- **Themes (0.1.0):** Default page theme is Newsprint (cream, serif). Or follow the editor light/dark theme, or pick One Dark / Nord / etc. Diagrams default to Forest.
+- **Back to plain text (0.1.0):** Command Palette → `Daws Folio Markdown: 切换编辑器` to jump between this editor and the built-in text editor.
+- **Local and remote (0.1.0):** Same editor for `file`, `vscode-vfs`, and `vscode-remote` on `*.md` / `*.markdown`.
+- **Markdown only (0.1.0):** No office suite, export pipeline, or cloud rewrite.
 
 ### Install
 
@@ -44,19 +45,18 @@ If another editor still takes `.md`, set this in user or workspace `settings.jso
 
 ## 简体中文
 
-给 Cursor / VS Code 用的 Markdown 所见即所得编辑器。打开 `.md` 就能直接改排好的页面。表格单元格里的 `$...$` / `$$...$$` 按格子处理，美元符不会把 `|` 吃掉、把列拆开。
+面向 Cursor / VS Code 用户的 Markdown 所见即所得编辑器。主要实现了我自己在使用其他插件过程中发现的不满足的需求：
+
+表格单元格里的 `$...$` / `$$...$$` 按格子处理，美元符不会把 `|` 吃掉、把列拆开。
 
 ### 功能
 
-- **打开就是成稿：** 默认所见即所得。标题、列表、表格、引用按最终样子显示。
-- **即时渲染：** 需要看源码时切到 IR，源码和排版同一屏。
-- **表格公式不拆列：** 单元格里的 `$...$`、`$$...$$` 只在这一格里处理。整行配对 `$` 容易把竖线吃进公式，这里不会。
-- **公式：** KaTeX 渲染行内和独立公式。数字旁边的 `$` 也能认。
-- **图表：** Mermaid 流程图、时序图直接画出来。图表主题和正文主题分开设。
-- **主题：** 正文默认 Newsprint（米底、衬线、随窗口伸缩）。也可以跟编辑器亮暗走，或选 One Dark、Nord 等。图表默认 Forest。
-- **切回文本：** 命令面板执行「Daws Folio Markdown: 切换编辑器」，和内置文本编辑器来回切。
-- **本地和远程：** `file`、`vscode-vfs`、`vscode-remote` 下的 `*.md` / `*.markdown` 都是这一个编辑器。
-- **只做 Markdown：** 没有办公套件、导出、云端改写。
+- **所见即所得、即时渲染（v0.1.0）：** 打开Markdown 文件，在预览中修改文件，无需编辑/预览双开
+- **表格内插公式不崩溃（v0.1.5）：** 大部分所见即所得渲染器的表格内含有公式时，一旦表格内容发生剪切、删除，表格内容就会发生错位。该问题目前仅在我们这个编辑器中得到修复：我们在 v0.1.5 中解决了这个问题。
+- **自适应宽度（v0.1.0）：** 页面内容（文字、公式、图片）宽度跟随编辑器窗口宽度
+- **公式（v0.1.0）：** 支持KaTeX 渲染行内和独立公式
+- **图表（v0.1.0）：** 支持内插Mermaid 流程图、时序图
+- **主题美化（v0.1.0）：** 正文默认使用  Folio 风格：米底、衬线，可以选择背景与编辑器一致
 
 ### 安装
 
@@ -82,11 +82,11 @@ code --install-extension dawsine.daws-folio-markdown
 
 Prefix: `dawsFolioMarkdown.*`
 
-| Key | Values | Default |
-| --- | --- | --- |
-| `dawsFolioMarkdown.editMode` | `wysiwyg` \| `ir` | `wysiwyg` |
-| `dawsFolioMarkdown.editorTheme` | Newsprint, Auto, Light, One Dark, … | `Newsprint` |
-| `dawsFolioMarkdown.mermaidTheme` | Forest, Auto, Light, Dark, … | `Forest` |
+| Key                                | Values                               | Default       |
+| ---------------------------------- | ------------------------------------ | ------------- |
+| `dawsFolioMarkdown.editMode`     | `wysiwyg`                          | `ir`        |
+| `dawsFolioMarkdown.editorTheme`  | Newsprint, Auto, Light, One Dark, … | `Newsprint` |
+| `dawsFolioMarkdown.mermaidTheme` | Forest, Auto, Light, Dark, …        | `Forest`    |
 
 ## Build from source / 从源码安装
 
