@@ -1,0 +1,74 @@
+name: publish
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+      - run: npm test
+      - name: Open VSX
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          set -euo pipefail
+          if [ -z "${OVSX_PAT:-}" ]; then
+            echo "OVSX_PAT missing; skip Open VSX."
+            exit 0
+          fi
+          out="$(npx --yes ovsx publish -p "$OVSX_PAT" 2>&1)" && rc=0 || rc=$?
+          printf '%s\n' "$out"
+          if [ "$rc" -eq 0 ]; then
+            exit 0
+          fi
+          echo "$out" | grep -qiE 'already published|already exists|currently isn.t active' \
+            && echo "Open VSX: version already on the registry." \
+            || exit "$rc"
+      - name: VS Marketplace via OIDC
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          out="$(npx --yes @vscode/vsce publish --oidc --skip-duplicate 2>&1)" && rc=0 || rc=$?
+          printf '%s\n' "$out"
+          if [ "$rc" -eq 0 ]; then
+            exit 0
+          fi
+          echo "$out" | grep -qiE 'already published|already exists|skip-duplicate' \
+            && echo "Marketplace: version already published." \
+            || exit "$rc"
+      - name: VS Marketplace via PAT
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        continue-on-error: true
+        run: |
+          if [ -z "${VSCE_PAT:-}" ]; then
+            echo "VSCE_PAT missing; skip PAT publish."
+            exit 0
+          fi
+          set -euo pipefail
+          out="$(npx --yes @vscode/vsce publish -p "$VSCE_PAT" --skip-duplicate 2>&1)" && rc=0 || rc=$?
+          printf '%s\n' "$out"
+          if [ "$rc" -eq 0 ]; then
+            exit 0
+          fi
+          echo "$out" | grep -qiE 'already published|already exists|skip-duplicate' \
+            && echo "Marketplace: version already published." \
+            || exit "$rc"

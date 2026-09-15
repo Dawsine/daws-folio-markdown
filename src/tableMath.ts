@@ -96,6 +96,56 @@ function findCloser(cell: string, from: number, delimiter: string): number {
   return -1;
 }
 
+const BR_TOKEN = "%%BR%%";
+const BR_TOKEN_RE = /%%BR%%/g;
+const BR_TAG_RE = /^<br\s*\/?>/i;
+
+function copyInlineCode(text: string, from: number): { text: string; next: number } {
+  let ticks = 0;
+  while (from + ticks < text.length && text[from + ticks] === "`") ticks++;
+  if (ticks === 0) return { text: text[from] ?? "", next: from + 1 };
+  const fence = "`".repeat(ticks);
+  const close = text.indexOf(fence, from + ticks);
+  if (close === -1) return { text: text.slice(from), next: text.length };
+  return { text: text.slice(from, close + ticks), next: close + ticks };
+}
+
+function copyMathToken(text: string, from: number): { text: string; next: number } | undefined {
+  if (!text.startsWith("%%M:", from)) return undefined;
+  const close = text.indexOf("%%", from + 4);
+  if (close === -1) return undefined;
+  return { text: text.slice(from, close + 2), next: close + 2 };
+}
+
+/** GFM table cells keep `<br>` as HTML; Lute/Vditor print it as text unless we tokenise it. */
+export function protectBreaksInCell(cell: string): string {
+  let out = "";
+  let i = 0;
+  while (i < cell.length) {
+    const math = copyMathToken(cell, i);
+    if (math) {
+      out += math.text;
+      i = math.next;
+      continue;
+    }
+    if (cell[i] === "`") {
+      const code = copyInlineCode(cell, i);
+      out += code.text;
+      i = code.next;
+      continue;
+    }
+    const br = cell.slice(i).match(BR_TAG_RE);
+    if (br) {
+      out += BR_TOKEN;
+      i += br[0].length;
+      continue;
+    }
+    out += cell[i];
+    i++;
+  }
+  return out;
+}
+
 function protectCell(cell: string): string {
   let out = "";
   let i = 0;
@@ -132,7 +182,7 @@ function protectTableLine(line: string): string {
   const core = line.slice(indent.length, line.length - trailing.length);
   if (!isPipeTableRow(core) || isSeparatorRow(core)) return line;
   const parts = splitUnescapedPipes(core);
-  const next = parts.map((part) => protectCell(part));
+  const next = parts.map((part) => protectBreaksInCell(protectCell(part)));
   return indent + next.join("|") + trailing;
 }
 
@@ -207,9 +257,40 @@ function wrapLeakedTex(tex: string): string {
   return `$${source}$`;
 }
 
-/** KaTeX MathML leaked into Markdown after a WYSIWYG table edit. */
+function findMatchingSpanEnd(text: string, from: number): number {
+  let depth = 1;
+  const re = /<\/?span\b[^>]*>/gi;
+  re.lastIndex = from;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(text))) {
+    if (match[0].startsWith("</")) depth -= 1;
+    else depth += 1;
+    if (depth === 0) return match.index + match[0].length;
+  }
+  return -1;
+}
+
+function stripKatexSpans(markdown: string): string {
+  const startRe = /<span\b[^>]*\bclass=(["'])[^"']*\bkatex(?:-display)?\b[^"']*\1[^>]*>/gi;
+  let result = "";
+  let last = 0;
+  let match: RegExpExecArray | null;
+  while ((match = startRe.exec(markdown))) {
+    const close = findMatchingSpanEnd(markdown, startRe.lastIndex);
+    if (close === -1) break;
+    const inner = markdown.slice(match.index, close);
+    const ann = /<annotation\b[^>]*application\/x-tex[^>]*>([\s\S]*?)<\/annotation>/i.exec(inner);
+    const already = /\$(?:\$)?[^$\n]+(?:\$)?\$/.exec(inner);
+    result += markdown.slice(last, match.index) + (ann ? wrapLeakedTex(ann[1]) : already ? already[0] : "");
+    last = close;
+    startRe.lastIndex = close;
+  }
+  return result + markdown.slice(last);
+}
+
+/** KaTeX HTML/MathML leaked into Markdown after a WYSIWYG edit or paste. */
 export function stripLeakedKatexMath(markdown: string): string {
-  return markdown.replace(LEAKED_MATHML_RE, (_all, _quote, tex) => {
+  return stripKatexSpans(markdown).replace(LEAKED_MATHML_RE, (_all, _quote, tex) => {
     return wrapLeakedTex(String(tex ?? ""));
   });
 }
@@ -218,6 +299,7 @@ export function restoreMathInTables(markdown: string): string {
   return stripLeakedKatexMath(
     markdown
       .replace(TOKEN_RE, (token) => decodeMathToken(token) ?? token)
-      .replace(/(?<!@)M:([A-Za-z0-9_-]{10,})(?!@)/g, (token) => decodeMathToken(token) ?? token),
+      .replace(/(?<!@)M:([A-Za-z0-9_-]{10,})(?!@)/g, (token) => decodeMathToken(token) ?? token)
+      .replace(BR_TOKEN_RE, "<br>"),
   );
 }

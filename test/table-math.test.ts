@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   protectAndList,
+  protectBreaksInCell,
   protectMathInTables,
   restoreMathInTables,
   stripLeakedKatexMath,
@@ -113,6 +114,33 @@ describe("protectMathInTables", () => {
     const fenced = "```\n| $O$ | $x$ |\n```";
     assert.equal(protectMathInTables(fenced), fenced);
   });
+
+  it("tokenises <br> between code spans and restores it", () => {
+    const row =
+      "| `HD-W-V-CD`<br>`HD-W-V-SCD`<br>`HD-W-V-OKMC` | `HD-Cu-SFT` |";
+    const { text } = protectAndList(row);
+    const cells = gfmCells(text);
+    assert.equal(cells.length, 2);
+    assert.equal(cells[0].includes("<br"), false);
+    assert.equal((cells[0].match(/%%BR%%/g) || []).length, 2);
+    assert.equal(cells[0].includes("`HD-W-V-CD`"), true);
+    assert.equal(restoreMathInTables(text), row);
+    assert.equal(protectMathInTables(restoreMathInTables(text)), text);
+  });
+
+  it("keeps <br> inside inline code and canonicalises <br/> outside it", () => {
+    assert.equal(protectBreaksInCell("`a<br>b`"), "`a<br>b`");
+    const row = "| a<br/>b | `keep<br/>me` |";
+    const wrapped = protectMathInTables(row);
+    assert.equal(wrapped.includes("%%BR%%"), true);
+    assert.equal(wrapped.includes("`keep<br/>me`"), true);
+    assert.equal(restoreMathInTables(wrapped), "| a<br>b | `keep<br/>me` |");
+  });
+
+  it("does not tokenise <br> outside tables", () => {
+    const paragraph = "段内<br>换行";
+    assert.equal(protectMathInTables(paragraph), paragraph);
+  });
 });
 
 describe("stripLeakedKatexMath", () => {
@@ -133,5 +161,13 @@ describe("stripLeakedKatexMath", () => {
       restoreMathInTables(leaked),
       "缺陷史 $1.0915\\times10^{5}$ s",
     );
+  });
+
+  it("turns a leaked KaTeX HTML span back into $C_{V_n}$", () => {
+    const leaked =
+      '空位谱 <span class="katex"><span class="katex-html"><span class="mord">C</span></span><math><annotation encoding="application/x-tex">C_{V_n}</annotation></math></span>';
+    const restored = restoreMathInTables(leaked);
+    assert.equal(restored.includes("<span"), false);
+    assert.match(restored, /空位谱 \$C_\{V_n\}\$/);
   });
 });

@@ -14,6 +14,7 @@
   var SKIP_MATH_CLOSEST =
     "code, script, style, .language-math, .katex, .vditor-reset--error, [data-leftover-math], [data-type='math-inline'], [data-type='math-block']";
   var CELL_SELECTOR = "td, th";
+  var BR_TOKEN = "%%BR%%";
   var TOOLBAR = [
     "headings",
     "bold",
@@ -359,28 +360,85 @@
     node.parentNode.replaceChild(document.createTextNode(encodeMathSource(source)), node);
   }
 
+  function restoreBreaksInClone(root) {
+    if (!root || !root.querySelectorAll) return;
+    var cells = root.querySelectorAll(CELL_SELECTOR);
+    var i;
+    var j;
+    for (i = 0; i < cells.length; i++) {
+      var breaks = cells[i].querySelectorAll("br");
+      for (j = breaks.length - 1; j >= 0; j--) {
+        var br = breaks[j];
+        if (br.closest && br.closest("code, pre, .language-math, [data-type='math-inline'], [data-type='math-block']")) {
+          continue;
+        }
+        if (!br.parentNode) continue;
+        br.parentNode.replaceChild(document.createTextNode(BR_TOKEN), br);
+      }
+    }
+  }
+
   function restoreMathInClone(root) {
     if (!root || !root.querySelectorAll) return;
-    var leftover = root.querySelectorAll("[data-leftover-math][data-math-source]");
+    restoreBreaksInClone(root);
     var i;
+    var sourced = root.querySelectorAll("[data-daws-math-source]");
+    for (i = sourced.length - 1; i >= 0; i--) {
+      replaceNodeWithToken(sourced[i], sourced[i].getAttribute("data-daws-math-source") || "");
+    }
+    var leftover = root.querySelectorAll("[data-leftover-math][data-math-source]");
     for (i = leftover.length - 1; i >= 0; i--) {
       replaceNodeWithToken(leftover[i], leftover[i].getAttribute("data-math-source") || "");
+    }
+    var blocks = root.querySelectorAll("[data-type='math-inline'], [data-type='math-block']");
+    for (i = blocks.length - 1; i >= 0; i--) {
+      var block = blocks[i];
+      if (!block.parentNode) continue;
+      var code = block.querySelector ? block.querySelector("code") : null;
+      var tex = stripZwsp((code && code.textContent) || block.getAttribute("data-math") || "");
+      if (!tex) continue;
+      replaceNodeWithToken(block, wrapInlineTex(tex, block.getAttribute("data-type") === "math-block"));
+    }
+    var marked = root.querySelectorAll("[data-math]");
+    for (i = marked.length - 1; i >= 0; i--) {
+      if (!marked[i].parentNode) continue;
+      replaceNodeWithToken(marked[i], wrapInlineTex(marked[i].getAttribute("data-math") || "", false));
     }
     var maths = root.querySelectorAll("math");
     for (i = maths.length - 1; i >= 0; i--) {
       var math = maths[i];
-      if (math.closest && math.closest("[data-type='math-inline'], [data-type='math-block']")) continue;
-      var tex = annotationTex(math);
-      if (!tex) continue;
+      if (!math.parentNode) continue;
+      var ann = annotationTex(math);
+      if (!ann) continue;
       var display = math.getAttribute("display") === "block" || !!(math.closest && math.closest(".katex-display"));
       var host = (math.closest && math.closest(".katex")) || math;
-      replaceNodeWithToken(host, wrapInlineTex(tex, display));
+      replaceNodeWithToken(host, wrapInlineTex(ann, display));
     }
+  }
+
+  function decodeTokensInText(text) {
+    return String(text || "")
+      .replace(PLACEHOLDER_RE, function (token) {
+        return decodeMathToken(token) || token;
+      })
+      .replace(/%%BR%%/g, "\n")
+      .replace(/\u00a0/g, " ");
+  }
+
+  function markdownFromClipboard(text, html) {
+    if (html && /katex|<math|data-math|math-inline|data-daws-math/i.test(html)) {
+      var wrap = document.createElement("div");
+      wrap.innerHTML = html;
+      restoreMathInClone(wrap);
+      var recovered = decodeTokensInText(wrap.textContent || "").replace(/[ \t]+\n/g, "\n");
+      if (recovered.replace(/\s+/g, "").length) return normalizePastedMath(recovered);
+    }
+    return normalizePastedMath(String(text || ""));
   }
 
   function htmlWithMathSources(html) {
     var text = String(html == null ? "" : html);
-    if (!/(leftover-math|katex|<math|data-math-source)/i.test(text)) return text;
+    if (!/(leftover-math|katex|<math|data-math|data-type=.math|data-daws-math-source|<br|%%BR%%)/i.test(text)) return text;
     var wrap = document.createElement("div");
     wrap.innerHTML = text;
     restoreMathInClone(wrap);
@@ -483,24 +541,33 @@
     };
   }
 
+  function appendTextWithBreaks(frag, text) {
+    var parts = String(text || "").split(/%%BR%%|<br\s*\/?>/i);
+    var i;
+    for (i = 0; i < parts.length; i++) {
+      if (i > 0) frag.appendChild(document.createElement("br"));
+      if (parts[i]) frag.appendChild(document.createTextNode(parts[i]));
+    }
+  }
+
   function fragmentFromMathText(text, katex) {
     var frag = document.createDocumentFragment();
     var last = 0;
     var match = nextMathMatch(text, 0);
     while (match) {
       if (match.index > last) {
-        frag.appendChild(document.createTextNode(text.slice(last, match.index)));
+        appendTextWithBreaks(frag, text.slice(last, match.index));
       }
       if (match.source) {
         frag.appendChild(createMathSpan(match.source, katex));
       } else {
-        frag.appendChild(document.createTextNode(match.raw));
+        appendTextWithBreaks(frag, match.raw);
       }
       last = match.end;
       match = nextMathMatch(text, last);
     }
     if (last < text.length) {
-      frag.appendChild(document.createTextNode(text.slice(last)));
+      appendTextWithBreaks(frag, text.slice(last));
     }
     return frag;
   }
@@ -546,6 +613,10 @@
       return;
     }
     if (node.nodeType !== Node.ELEMENT_NODE) return;
+    if (node.tagName === "BR") {
+      parts.push(BR_TOKEN);
+      return;
+    }
     if (node.getAttribute && node.getAttribute("data-leftover-math")) {
       parts.push(node.getAttribute("data-math-source") || "");
       return;
@@ -666,15 +737,16 @@
       joined += stripZwsp(nodes[i].nodeValue);
     }
     var painted = cell.querySelectorAll("[data-leftover-math], [data-type='math-inline'], [data-type='math-block']");
-    if (painted.length && !hasMathPlaceholder(joined) && joined.indexOf("$") === -1) return;
+    var hasBreak = joined.indexOf(BR_TOKEN) !== -1 || /<br\s*\/?>/i.test(joined);
+    if (painted.length && !hasMathPlaceholder(joined) && joined.indexOf("$") === -1 && !hasBreak) return;
     if (!nodes.length) {
-      if (painted.length) return;
+      if (painted.length && !hasBreak) return;
       joined = stripZwsp(cell.textContent || "");
-      if (!hasMathPlaceholder(joined) && joined.indexOf("$") === -1) return;
+      if (!hasMathPlaceholder(joined) && joined.indexOf("$") === -1 && joined.indexOf(BR_TOKEN) === -1) return;
       replaceCellPhrasing(cell, fragmentFromMathText(joined, katex));
       return;
     }
-    if (hasMathPlaceholder(joined) || (painted.length && joined.indexOf("$") !== -1)) {
+    if (hasMathPlaceholder(joined) || hasBreak || (painted.length && joined.indexOf("$") !== -1)) {
       replaceCellPhrasing(cell, fragmentFromMathText(cellPlainSource(cell), katex));
       return;
     }
@@ -725,15 +797,41 @@
    * Table cells use Vditor native math-inline (source in <code>), never leftover KaTeX.
    * Never run /\$...\$/ against a table row's innerText.
    */
+  function expandCellBreaks(root) {
+    if (!root || !root.querySelectorAll) return;
+    var cells =
+      root.tagName === "TD" || root.tagName === "TH" ? [root] : root.querySelectorAll(CELL_SELECTOR);
+    var i;
+    var j;
+    for (i = 0; i < cells.length; i++) {
+      if (selectionTouches(cells[i])) continue;
+      if (cells[i].querySelector("[data-daws-math-editing]")) continue;
+      var nodes = collectSafeTextNodes(cells[i]);
+      for (j = 0; j < nodes.length; j++) {
+        var text = stripZwsp(nodes[j].nodeValue || "");
+        if (text.indexOf(BR_TOKEN) === -1 && !/<br\s*\/?>/i.test(text)) continue;
+        if (!nodes[j].parentNode) continue;
+        var frag = document.createDocumentFragment();
+        appendTextWithBreaks(frag, text);
+        nodes[j].parentNode.replaceChild(frag, nodes[j]);
+      }
+    }
+  }
+
   function renderLeftoverInlineMath(root) {
     var katex = window.katex;
-    if (!katex || !root) return;
+    if (!root) return;
+    if (!katex) {
+      expandCellBreaks(root);
+      return;
+    }
     upgradeForeignMathInTables(root, katex);
     if (root.tagName === "TR" || root.tagName === "TABLE") {
       var forcedCells = root.querySelectorAll(CELL_SELECTOR);
       for (var c = 0; c < forcedCells.length; c++) {
         renderMathInCell(forcedCells[c], katex);
       }
+      expandCellBreaks(root);
       return;
     }
     var cells = root.querySelectorAll(CELL_SELECTOR);
@@ -748,6 +846,7 @@
     for (i = 0; i < nodes.length; i++) {
       renderMathInTextNode(nodes[i], katex);
     }
+    expandCellBreaks(root);
   }
 
   function scheduleLeftoverMath() {
@@ -1085,7 +1184,47 @@
 
   function selectedPlainText() {
     var sel = window.getSelection();
-    return sel ? sel.toString() : "";
+    if (!sel || sel.rangeCount === 0) return "";
+    try {
+      var holder = document.createElement("div");
+      holder.appendChild(sel.getRangeAt(0).cloneContents());
+      if (holder.querySelector("math, .katex, [data-math], [data-daws-math-source], [data-type='math-inline'], [data-type='math-block'], [data-leftover-math]")) {
+        restoreMathInClone(holder);
+        return decodeTokensInText(holder.textContent || "").replace(/\s+\n/g, "\n").trim();
+      }
+    } catch (err) {
+      /* fall through */
+    }
+    return sel.toString();
+  }
+
+  function insertMarkdownAtCaret(text) {
+    var value = normalizePastedMath(String(text || ""));
+    if (!value) {
+      notifyEditorChanged();
+      return;
+    }
+    var sel = document.getSelection();
+    if (!sel || sel.rangeCount === 0) {
+      document.execCommand("insertText", false, value);
+      notifyEditorChanged();
+      scheduleLeftoverMath();
+      return;
+    }
+    var range = sel.getRangeAt(0);
+    range.deleteContents();
+    var frag = fragmentFromMathText(value, window.katex);
+    var last = frag.lastChild;
+    range.insertNode(frag);
+    if (last && last.parentNode) {
+      var after = document.createRange();
+      after.setStartAfter(last);
+      after.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(after);
+    }
+    notifyEditorChanged();
+    scheduleLeftoverMath();
   }
 
   function selectionIsCollapsed() {
@@ -1114,9 +1253,10 @@
   function runClipboard(action, text) {
     if (action === "paste") {
       if (typeof text === "string") {
-        document.execCommand("insertText", false, text);
+        insertMarkdownAtCaret(text);
+      } else {
+        notifyEditorChanged();
       }
-      notifyEditorChanged();
       return;
     }
     if (selectionIsCollapsed() && action === "cut") return;
@@ -1127,32 +1267,58 @@
     }
   }
 
-  function isModKey(event) {
-    return event.metaKey || event.ctrlKey;
+  function normalizePastedMath(text) {
+    return String(text || "")
+      .replace(/\\\(([\s\S]*?)\\\)/g, function (_all, tex) {
+        return "$" + String(tex || "").trim() + "$";
+      })
+      .replace(/\\\[([\s\S]*?)\\\]/g, function (_all, tex) {
+        return "$$" + String(tex || "").trim() + "$$";
+      });
   }
 
   document.addEventListener(
-    "keydown",
+    "copy",
     function (event) {
-      if (!isModKey(event) || event.altKey || event.shiftKey) return;
-      var key = String(event.key || "").toLowerCase();
-      if (key === "x") {
-        event.preventDefault();
-        event.stopPropagation();
-        runClipboard("cut");
+      var text = selectedPlainText();
+      if (!text || !event.clipboardData) return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.clipboardData.setData("text/plain", text);
+      vscode.postMessage({ type: "clipboardWrite", payload: { text: text } });
+    },
+    true,
+  );
+
+  document.addEventListener(
+    "cut",
+    function (event) {
+      var text = selectedPlainText();
+      if (!event.clipboardData) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (text) {
+        event.clipboardData.setData("text/plain", text);
+        vscode.postMessage({ type: "clipboardWrite", payload: { text: text } });
+      }
+      deleteSelection();
+      notifyEditorChanged();
+    },
+    true,
+  );
+
+  document.addEventListener(
+    "paste",
+    function (event) {
+      if (!event.clipboardData) return;
+      var text = event.clipboardData.getData("text/plain");
+      var html = event.clipboardData.getData("text/html");
+      if (!String(text || "") && !/katex|<math|data-math|math-inline|data-daws-math/i.test(html || "")) {
         return;
       }
-      if (key === "c") {
-        event.preventDefault();
-        event.stopPropagation();
-        runClipboard("copy");
-        return;
-      }
-      if (key === "v") {
-        event.preventDefault();
-        event.stopPropagation();
-        vscode.postMessage({ type: "clipboardNeed", payload: { action: "paste" } });
-      }
+      event.preventDefault();
+      event.stopPropagation();
+      insertMarkdownAtCaret(markdownFromClipboard(text, html));
     },
     true,
   );

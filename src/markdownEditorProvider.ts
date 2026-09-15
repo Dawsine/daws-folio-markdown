@@ -294,8 +294,8 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
 		const katexJs = webview
 			.asWebviewUri(vscode.Uri.joinPath(vditorDir, 'dist', 'js', 'katex', 'katex.min.js'))
 			.toString();
-		const editorCss = cacheBust(webview.asWebviewUri(vscode.Uri.joinPath(mediaDir, 'editor.css')).toString(), '0.1.9');
-		const scriptUri = cacheBust(webview.asWebviewUri(vscode.Uri.joinPath(mediaDir, 'editor.js')).toString(), '0.1.9');
+		const editorCss = cacheBust(webview.asWebviewUri(vscode.Uri.joinPath(mediaDir, 'editor.css')).toString(), '0.1.15');
+		const scriptUri = cacheBust(webview.asWebviewUri(vscode.Uri.joinPath(mediaDir, 'editor.js')).toString(), '0.1.15');
 		const mediaRoot = webview.asWebviewUri(mediaDir).toString();
 		const vditorRoot = webview.asWebviewUri(vditorDir).toString();
 		const cspSource = webview.cspSource;

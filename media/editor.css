@@ -50,13 +50,17 @@ body {
   );
 }
 
-#vditor {
+#vditor,
+#vditor.vditor,
+#vditor .vditor {
   height: 100%;
   width: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 #vditor .vditor {
-  height: 100%;
   border: none;
   border-radius: 0;
   font-family: inherit;
@@ -71,6 +75,7 @@ body {
 }
 
 #vditor .vditor-toolbar {
+  flex: 0 0 auto;
   border-radius: 0;
   padding: 2px 8px;
   min-height: 28px;
@@ -89,7 +94,9 @@ body {
 }
 
 #vditor .vditor-content {
+  flex: 1 1 auto;
   min-height: 0;
+  overflow: auto;
   background: var(--vscode-editor-background, #fff);
 }
 
@@ -105,6 +112,13 @@ body {
 }
 
 #vditor .vditor-wysiwyg,
+#vditor .vditor-ir {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+#vditor .vditor-wysiwyg,
 #vditor .vditor-ir,
 #vditor .vditor-reset {
   max-width: none;
@@ -112,6 +126,13 @@ body {
   box-sizing: border-box;
   margin: 0;
   padding: 1.5em clamp(1.25rem, 4vw, 3.5rem) 4.5em !important;
+}
+
+#vditor .vditor-wysiwyg pre.vditor-reset,
+#vditor .vditor-ir pre.vditor-reset {
+  height: auto !important;
+  min-height: 100%;
+  overflow: visible;
 }
 
 #vditor .vditor-reset h1,
@@ -197,6 +218,11 @@ body {
   white-space: normal !important;
   word-break: break-word;
   overflow-wrap: anywhere;
+}
+
+#vditor td br,
+#vditor th br {
+  display: block;
 }
 
 #vditor .vditor-reset thead th {

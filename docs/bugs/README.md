@@ -8,3 +8,6 @@
 | [004](004-cut-goes-to-text-document.md) | Folio 里剪切没反应 | 0.1.7 记住窗口，剪切走系统剪贴板 |
 | [005](005-cmd-click-link.md) | Cmd+左键点蓝链不能跳转 | 0.1.8 交给宿主打开 |
 | [006](006-paste-steals-from-chat.md) | Folio 开着时截图粘不进对话框 | 0.1.9 输入框聚焦时不抢 Cmd+V |
+| [007](007-diff-stolen-by-folio.md) | 更改对比只看见文首，另一侧是白的 | 0.1.13 git / 对比走文本编辑器 |
+| [008](008-table-br-shown-as-text.md) | 表格格子里的 `<br>` 当字印出来 | 0.1.14 画成换行，写回仍是 `<br>` |
+| [009](009-paste-formula-explodes.md) | 粘贴公式变成 C / V / n 分行 | 0.1.15 复制写 `$...$`，粘贴按公式插入 |
