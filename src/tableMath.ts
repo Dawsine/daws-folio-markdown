@@ -295,11 +295,30 @@ export function stripLeakedKatexMath(markdown: string): string {
   });
 }
 
+function mapOutsideFences(markdown: string, rewrite: (chunk: string) => string): string {
+  return markdown
+    .split(/(```[\s\S]*?```)/)
+    .map((chunk, index) => (index % 2 === 1 ? chunk : rewrite(chunk)))
+    .join("");
+}
+
+/** Vditor getValue glues `$$...$$` to the next `$...$`, producing `$$$` that KaTeX cannot parse. */
+export function separateAdjacentMath(markdown: string): string {
+  return mapOutsideFences(markdown, (chunk) =>
+    chunk.replace(/\$\$([\s\S]*?)\$\$(\S)/g, (_all, tex, next) => {
+      const body = String(tex ?? "").trim();
+      return `$$\n${body}\n$$\n\n${next}`;
+    }),
+  );
+}
+
 export function restoreMathInTables(markdown: string): string {
-  return stripLeakedKatexMath(
-    markdown
-      .replace(TOKEN_RE, (token) => decodeMathToken(token) ?? token)
-      .replace(/(?<!@)M:([A-Za-z0-9_-]{10,})(?!@)/g, (token) => decodeMathToken(token) ?? token)
-      .replace(BR_TOKEN_RE, "<br>"),
+  return separateAdjacentMath(
+    stripLeakedKatexMath(
+      markdown
+        .replace(TOKEN_RE, (token) => decodeMathToken(token) ?? token)
+        .replace(/(?<!@)M:([A-Za-z0-9_-]{10,})(?!@)/g, (token) => decodeMathToken(token) ?? token)
+        .replace(BR_TOKEN_RE, "<br>"),
+    ),
   );
 }

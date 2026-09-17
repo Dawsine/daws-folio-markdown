@@ -34,6 +34,339 @@
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
+@font-face {
+  font-family: "Nunito";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./fonts/nunito-latin-400-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "Nunito";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./fonts/nunito-latin-ext-400-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: "Nunito";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("./fonts/nunito-latin-700-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "Nunito";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("./fonts/nunito-latin-ext-700-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: DawsMathds;
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url("./fonts/daws-mathds.woff2") format("woff2");
+  unicode-range: U+1D7D8-1D7E1;
+}
+
+#daws-shell {
+  display: flex;
+  height: 100%;
+  width: 100%;
+  min-height: 0;
+}
+
+#daws-toc {
+  display: none;
+  flex: 0 0 228px;
+  flex-direction: column;
+  width: 228px;
+  min-width: 168px;
+  min-height: 0;
+  border-right: 1px solid var(--vscode-panel-border, #c5c5c5);
+  background: var(--vscode-sideBar-background, var(--vscode-editor-background, #fff));
+}
+
+body.daws-toc-open #daws-toc:not([hidden]) {
+  display: flex;
+}
+
+#daws-toc-close {
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+#daws-toc-close:hover {
+  opacity: 1;
+}
+
+.daws-toc-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 10px 12px 8px;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--vscode-descriptionForeground, #656565);
+}
+
+#daws-toc-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 8px 16px;
+}
+
+.daws-toc-empty {
+  margin: 12px 8px;
+  color: var(--vscode-descriptionForeground, #656565);
+  font-size: 12px;
+}
+
+.daws-toc-item {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 4px 8px 4px calc(8px + (var(--daws-toc-level, 1) - 1) * 12px);
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.45;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.daws-toc-item[data-level="1"] { --daws-toc-level: 1; }
+.daws-toc-item[data-level="2"] { --daws-toc-level: 2; }
+.daws-toc-item[data-level="3"] { --daws-toc-level: 3; }
+.daws-toc-item[data-level="4"] { --daws-toc-level: 4; }
+.daws-toc-item[data-level="5"] { --daws-toc-level: 5; }
+.daws-toc-item[data-level="6"] { --daws-toc-level: 6; }
+
+.daws-toc-item:hover,
+.daws-toc-item.is-current {
+  background: var(--vscode-list-hoverBackground, rgba(0, 0, 0, 0.06));
+}
+
+.daws-toc-item.is-current {
+  color: var(--vscode-textLink-foreground, #2a67d3);
+}
+
+#daws-main {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+#daws-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--vscode-panel-border, rgba(0, 0, 0, 0.08));
+  background: var(--vscode-editor-background, #fff);
+}
+
+#daws-toc-btn,
+.daws-tool-btn {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 6px;
+  opacity: 0.75;
+}
+
+#daws-toc-btn:hover,
+.daws-tool-btn:hover {
+  opacity: 1;
+}
+
+#daws-file-name {
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground, #656565);
+}
+
+#daws-split {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+}
+
+#daws-source-pane,
+#daws-preview-pane {
+  min-width: 160px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+#daws-source-pane {
+  position: relative;
+  display: flex;
+  flex: 0 0 var(--daws-source-width, 46%);
+  background: var(--vscode-editor-background, #fff);
+}
+
+#daws-source-gutter {
+  flex: 0 0 58px;
+  padding: 12px 4px 12px 2px;
+  overflow: hidden;
+  color: var(--vscode-editorLineNumber-foreground, #858585);
+  font-family: var(--daws-font-family-editor, ui-monospace, monospace);
+  font-size: 13px;
+  line-height: 1.55;
+  user-select: none;
+}
+
+.daws-gutter-line {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 1px;
+  box-sizing: border-box;
+}
+
+.daws-fold-btn {
+  flex: 0 0 14px;
+  width: 14px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 9px;
+  line-height: inherit;
+  cursor: pointer;
+  opacity: 0.65;
+}
+
+.daws-fold-btn:hover,
+.daws-fold-btn.is-folded {
+  opacity: 1;
+}
+
+.daws-gutter-no {
+  min-width: 28px;
+  text-align: right;
+  cursor: pointer;
+}
+
+#daws-source {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  margin: 0;
+  padding: 12px 14px 12px 8px;
+  border: 0;
+  resize: none;
+  outline: none;
+  background: transparent;
+  color: var(--vscode-editor-foreground, #1a1a1a);
+  font-family: var(--daws-font-family-editor, ui-monospace, monospace);
+  font-size: 13px;
+  line-height: 1.55;
+  tab-size: 2;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+#daws-source-measure {
+  position: absolute;
+  left: -99999px;
+  top: 0;
+  visibility: hidden;
+  pointer-events: none;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  box-sizing: content-box;
+}
+
+#daws-split-bar {
+  flex: 0 0 5px;
+  cursor: col-resize;
+  background: var(--vscode-panel-border, rgba(0, 0, 0, 0.08));
+}
+
+#daws-split-bar:hover,
+body.daws-resizing #daws-split-bar {
+  background: var(--vscode-textLink-foreground, #2a67d3);
+}
+
+#daws-preview-pane {
+  flex: 1 1 auto;
+  overflow: auto;
+}
+
+#daws-preview-pane #vditor,
+#daws-preview-pane #vditor.vditor,
+#daws-preview-pane #vditor .vditor {
+  display: block;
+  height: auto;
+  min-height: 100%;
+}
+
+body.daws-theme-newsprint #daws-toolbar,
+body.daws-theme-newsprint #daws-source-pane {
+  background: var(--vscode-editor-background, #fff);
+  color: var(--vscode-editor-foreground, #1a1a1a);
+  font-family: var(--vscode-font-family, system-ui, sans-serif);
+}
+
+#daws-preview [data-daws-line] {
+  scroll-margin-top: 24px;
+}
+
+#daws-preview,
+#daws-preview.vditor-reset {
+  min-height: 100%;
+  box-sizing: border-box;
+  padding: 1.5em clamp(1.25rem, 4vw, 3.5rem) 4.5em;
+}
+
+#daws-preview [data-daws-line].daws-locate,
+#daws-preview .daws-locate {
+  outline: 2px solid color-mix(in srgb, var(--vscode-textLink-foreground, #2a67d3) 55%, transparent);
+  outline-offset: 3px;
+}
+
+#vditor {
+  height: auto;
+  min-height: 100%;
+}
+
 html,
 body {
   height: 100%;
@@ -48,6 +381,8 @@ body {
     --daws-font-family-ui,
     var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Segoe UI", sans-serif)
   );
+  --daws-font-family-text: "Nunito", "Yuanti SC", "Hiragino Maru Gothic ProN",
+    "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Source Han Sans SC", sans-serif;
 }
 
 #vditor,
@@ -265,22 +600,60 @@ body {
   overflow: auto;
 }
 
+#vditor .vditor-reset :is(.language-text, .language-txt, .language-plaintext, .language-plain),
+#vditor .vditor-reset pre:has(> :is(.language-text, .language-txt, .language-plaintext, .language-plain)),
+#vditor .vditor-reset pre:has(> :is(.language-text, .language-txt, .language-plaintext, .language-plain)) code {
+  font-family: var(--daws-font-family-text) !important;
+  font-size: 1em;
+  font-weight: 400;
+  line-height: 1.65;
+  letter-spacing: 0.01em;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#vditor .vditor-reset pre:has(> :is(.language-text, .language-txt, .language-plaintext, .language-plain)) code,
+#vditor .vditor-reset code:is(.language-text, .language-txt, .language-plaintext, .language-plain) {
+  padding: 0;
+  background: transparent;
+  border-radius: 0;
+}
+
+#vditor .katex,
 #vditor .vditor-reset .katex,
 #vditor td .katex,
 #vditor th .katex,
 #vditor .language-math .katex,
 #vditor [data-leftover-math] .katex {
-  font-size: 1.21em;
+  font-size: 1em;
+  font-family: KaTeX_Main, DawsMathds, "Times New Roman", serif;
 }
 
+#vditor .katex-display,
 #vditor .vditor-reset .katex-display,
 #vditor .language-math .katex-display,
 #vditor [data-leftover-math] .katex-display {
+  font-size: 1em;
   margin: 0.35em 0;
 }
 
 #vditor [data-leftover-math] {
   display: inline;
+}
+
+#vditor [data-daws-caret] {
+  display: inline;
+  width: 0;
+  height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  font-size: 0;
+  line-height: 0;
 }
 
 #vditor td .vditor-wysiwyg__block[data-type="math-inline"],
@@ -399,6 +772,16 @@ body.daws-theme-newsprint #vditor .vditor {
   --toolbar-background-color: var(--daws-paper);
   --textarea-background-color: var(--daws-paper);
   --textarea-text-color: var(--daws-ink);
+}
+
+body.daws-theme-newsprint #daws-toc {
+  background: var(--daws-paper);
+  border-right-color: var(--daws-rule);
+  color: var(--daws-ink);
+}
+
+body.daws-theme-newsprint .daws-toc-item.is-current {
+  color: var(--daws-link);
 }
 
 body.daws-theme-newsprint #vditor .vditor-toolbar,
@@ -557,4 +940,12 @@ body.daws-theme-newsprint #vditor .vditor-reset pre:not(.vditor-wysiwyg__preview
   border-radius: 0;
   margin: 0 0 1.5em 2em;
   padding: 0.6em 1ch;
+}
+
+body.daws-theme-newsprint #vditor .vditor-reset :is(.language-text, .language-txt, .language-plaintext, .language-plain),
+body.daws-theme-newsprint #vditor .vditor-reset pre:has(> :is(.language-text, .language-txt, .language-plaintext, .language-plain)),
+body.daws-theme-newsprint #vditor .vditor-reset pre:has(> :is(.language-text, .language-txt, .language-plaintext, .language-plain)) code {
+  font-family: var(--daws-font-family-text) !important;
+  font-size: 1em;
+  line-height: 1.65;
 }

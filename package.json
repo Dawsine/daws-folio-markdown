@@ -1,8 +1,8 @@
 {
 	"name": "daws-folio-markdown",
 	"displayName": "Daws Folio Markdown",
-	"description": "WYSIWYG Markdown editor. Math in table cells won't break columns. / 所见即所得，公式不会炸表格",
-	"version": "0.1.15",
+	"description": "In-page Markdown source + Folio preview. Math in table cells won't break columns. / 页内源码与预览，公式不会炸表格",
+	"version": "0.1.29",
 	"publisher": "dawsine",
 	"license": "MIT",
 	"icon": "images/icon.png",
@@ -33,20 +33,26 @@
 	],
 	"activationEvents": [
 		"onStartupFinished",
+		"onLanguage:markdown",
 		"onCustomEditor:dawsine.folioMarkdown",
-		"onCommand:dawsFolioMarkdown.switchEditor"
+		"onCommand:dawsFolioMarkdown.switchEditor",
+		"onCommand:dawsFolioMarkdown.openPreviewToTheSide"
 	],
 	"main": "./out/extension.js",
 	"contributes": {
 		"configurationDefaults": {
 			"workbench.editorAssociations": {
+				"*.md": "dawsine.folioMarkdown",
+				"*.markdown": "dawsine.folioMarkdown",
 				"{git,gitlens}:/**/*.md": "default",
 				"{git,gitlens}:/**/*.markdown": "default"
 			},
 			"workbench.diffEditorAssociations": {
 				"*.md": "default",
 				"*.markdown": "default"
-			}
+			},
+			"markdown-preview-enhanced.automaticallyShowPreviewOfMarkdownBeingEdited": false,
+			"markdown-preview-enhanced.hideDefaultVSCodeMarkdownPreviewButtons": true
 		},
 		"customEditors": [
 			{
@@ -81,6 +87,11 @@
 				"title": "Daws Folio Markdown: 切换编辑器"
 			},
 			{
+				"command": "dawsFolioMarkdown.openPreviewToTheSide",
+				"title": "Daws Folio Markdown: 打开 Folio",
+				"icon": "$(open-preview)"
+			},
+			{
 				"command": "dawsFolioMarkdown.cut",
 				"title": "Daws Folio Markdown: 剪切"
 			},
@@ -91,9 +102,25 @@
 			{
 				"command": "dawsFolioMarkdown.paste",
 				"title": "Daws Folio Markdown: 粘贴"
+			},
+			{
+				"command": "dawsFolioMarkdown.toggleOutline",
+				"title": "Daws Folio Markdown: 开关目录"
 			}
 		],
 		"keybindings": [
+			{
+				"command": "dawsFolioMarkdown.openPreviewToTheSide",
+				"key": "ctrl+shift+v",
+				"mac": "cmd+shift+v",
+				"when": "editorLangId == markdown || resourceExtname =~ /\\.(md|markdown)$/"
+			},
+			{
+				"command": "dawsFolioMarkdown.openPreviewToTheSide",
+				"key": "alt+m",
+				"mac": "alt+m",
+				"when": "editorLangId == markdown || resourceExtname =~ /\\.(md|markdown)$/"
+			},
 			{
 				"command": "dawsFolioMarkdown.cut",
 				"key": "ctrl+x",
@@ -111,9 +138,22 @@
 				"key": "ctrl+v",
 				"mac": "cmd+v",
 				"when": "activeCustomEditorId == 'dawsine.folioMarkdown' && !inputFocus && !textInputFocus"
+			},
+			{
+				"command": "dawsFolioMarkdown.toggleOutline",
+				"key": "alt+o",
+				"mac": "alt+o",
+				"when": "activeCustomEditorId == 'dawsine.folioMarkdown'"
 			}
 		],
 		"menus": {
+			"editor/title": [
+				{
+					"command": "dawsFolioMarkdown.openPreviewToTheSide",
+					"when": "editorLangId == markdown",
+					"group": "navigation"
+				}
+			],
 			"commandPalette": [
 				{
 					"command": "dawsFolioMarkdown.cut",
@@ -149,6 +189,11 @@
 		"configuration": {
 			"title": "Daws Folio Markdown",
 			"properties": {
+				"dawsFolioMarkdown.automaticallyShowPreview": {
+					"type": "boolean",
+					"default": false,
+					"markdownDescription": "已不再使用。0.1.27 起源码和预览在同一个 Folio 窗口里左右分栏，不再打开 Cursor 双标签。"
+				},
 				"dawsFolioMarkdown.editMode": {
 					"type": "string",
 					"enum": [
@@ -175,6 +220,11 @@
 					],
 					"default": "Newsprint",
 					"markdownDescription": "Markdown 正文主题。默认 `Newsprint`（Typora 新闻纸：米底、衬线、随窗口伸缩）。`Auto` 跟随 Cursor / VS Code 亮暗。"
+				},
+				"dawsFolioMarkdown.showOutline": {
+					"type": "boolean",
+					"default": true,
+					"markdownDescription": "打开 Markdown 时显示左侧目录。工具栏「目录」或 `Alt+O` 开关。"
 				},
 				"dawsFolioMarkdown.mermaidTheme": {
 					"type": "string",

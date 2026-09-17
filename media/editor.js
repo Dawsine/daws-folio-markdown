@@ -4,18 +4,31 @@
 
   var vscode = acquireVsCodeApi();
 
-  var SAVE_DEBOUNCE_MS = 200;
-  var MATH_DEBOUNCE_MS = 80;
+  var SAVE_DEBOUNCE_MS = 400;
+  var MATH_DEBOUNCE_MS = 280;
+  var REMOTE_SETTLE_MS = 80;
   var PLACEHOLDER_RE =
-    /%%M:[A-Za-z0-9_-]+%%|@@M:[A-Za-z0-9_-]+@@|\u2039M:[A-Za-z0-9_-]+\u203A|(?<![A-Za-z0-9_%@-])M:[A-Za-z0-9_-]{10,}(?![A-Za-z0-9_-])/g;
+    /%{1,2}M:[A-Za-z0-9_-]+%{0,2}|@@M:[A-Za-z0-9_-]+@@|\u2039M:[A-Za-z0-9_-]+\u203A|(?<![A-Za-z0-9_%@-])M:[A-Za-z0-9_-]{10,}(?![A-Za-z0-9_-])/g;
   var PLACEHOLDER_ONLY_RE =
     /^(?:\s|%%M:[A-Za-z0-9_-]+%%|@@M:[A-Za-z0-9_-]+@@|\u2039M:[A-Za-z0-9_-]+\u203A|\u2039M\d+\u203A|@@M\d+@@|M:[A-Za-z0-9_-]{10,})*$/;
   var INLINE_MATH_RE = /\$([^$\n]+?)\$/g;
   var SKIP_MATH_CLOSEST =
-    "code, script, style, .language-math, .katex, .vditor-reset--error, [data-leftover-math], [data-type='math-inline'], [data-type='math-block']";
+    "code, script, style, .language-math, .katex, .vditor-reset--error, [data-leftover-math], [data-type='math-inline'], [data-type='math-block'], [data-daws-caret]";
   var CELL_SELECTOR = "td, th";
   var BR_TOKEN = "%%BR%%";
+  var TOC_ICON =
+    '<svg viewBox="0 0 32 32" width="16" height="16"><path d="M4 7h24v2.4H4V7zm0 7.8h24v2.4H4v-2.4zm0 7.8h24V25H4v-2.4z"></path></svg>';
   var TOOLBAR = [
+    {
+      name: "toc",
+      tip: "目录",
+      tipPosition: "s",
+      icon: TOC_ICON,
+      click: function () {
+        setOutlineOpen(!outlineOpen, true);
+      },
+    },
+    "|",
     "headings",
     "bold",
     "italic",
@@ -38,7 +51,6 @@
     "redo",
     "|",
     "edit-mode",
-    "outline",
     "preview",
   ];
 
@@ -48,7 +60,11 @@
   var appliedTheme = "";
   var lastSynced = "";
   var applyingRemote = false;
+  var hostActive = false;
+  var composing = false;
+  var composingGuardUntil = 0;
   var pendingUpdate = null;
+  var imeBound = false;
   var saveTimer = 0;
   var mathTimer = 0;
   var mathObserved = false;
@@ -59,6 +75,68 @@
   var documentBaseUrl = "";
   var workspaceBaseUrl = "";
   var documentFileName = "";
+  var lastCopiedText = "";
+  var lastPasteAt = 0;
+  var outlineOpen = true;
+  var tocTimer = 0;
+  var tocBound = false;
+  var DOUBLE_STRUCK_DIGITS = {
+    "0": "𝟘",
+    "1": "𝟙",
+    "2": "𝟚",
+    "3": "𝟛",
+    "4": "𝟜",
+    "5": "𝟝",
+    "6": "𝟞",
+    "7": "𝟟",
+    "8": "𝟠",
+    "9": "𝟡",
+  };
+  var katexMacros = {};
+  var splitBound = false;
+  var sourceBlocks = [];
+  var lastPreviewMd = "";
+  var previewTimer = 0;
+  var locateTimer = 0;
+  var locateLock = "";
+  var previewSeq = 0;
+  var fullSource = "";
+  var foldKeys = {};
+  var dispToFull = [];
+  var lastDispLines = [];
+  var applyingFold = false;
+  var lastHeads = [];
+
+  function expandMathdsArg(arg) {
+    var text = String(arg || "").replace(/^\{|\}$/g, "");
+    if (Object.prototype.hasOwnProperty.call(DOUBLE_STRUCK_DIGITS, text)) {
+      return DOUBLE_STRUCK_DIGITS[text];
+    }
+    return "\\mathbb{" + text + "}";
+  }
+
+  function mathdsKatexMacro(context) {
+    var tokens = context.consumeArgs(1)[0] || [];
+    var text = "";
+    var i;
+    for (i = 0; i < tokens.length; i++) text += tokens[i].text;
+    return expandMathdsArg(text);
+  }
+
+  function assignKatexMacros(userMacros) {
+    katexMacros = {
+      "\\mathds": mathdsKatexMacro,
+      "\\mathbbm": mathdsKatexMacro,
+    };
+    if (!userMacros || typeof userMacros !== "object") return;
+    var key;
+    for (key in userMacros) {
+      if (!Object.prototype.hasOwnProperty.call(userMacros, key)) continue;
+      if (typeof userMacros[key] === "string") katexMacros[key] = userMacros[key];
+    }
+  }
+
+  assignKatexMacros(null);
 
   function normalizeMarkdown(value) {
     return String(value == null ? "" : value).replace(/\r\n/g, "\n");
@@ -305,7 +383,7 @@
   }
 
   function decodeMathToken(token) {
-    var match = /^(?:%%M:|@@M:|\u2039M:|M:)([A-Za-z0-9_-]+)(?:%%|@@|\u203A)?$/.exec(token);
+    var match = /^(?:%%M:|%M:|@@M:|\u2039M:|M:)([A-Za-z0-9_-]+)(?:%%|%|@@|\u203A)?$/.exec(token);
     if (!match) return "";
     try {
       var b64 = match[1].replace(/-/g, "+").replace(/_/g, "/");
@@ -378,8 +456,54 @@
     }
   }
 
+  function dropCaretMarks(root) {
+    var scope = root && root.querySelectorAll ? root : document;
+    var marks = scope.querySelectorAll("[data-daws-caret]");
+    var i;
+    for (i = 0; i < marks.length; i++) {
+      if (marks[i].parentNode) marks[i].parentNode.removeChild(marks[i]);
+    }
+  }
+
+  function placeCaretMark() {
+    dropCaretMarks();
+    var sel = document.getSelection();
+    if (!sel || sel.rangeCount === 0) return null;
+    var range = sel.getRangeAt(0);
+    if (!rangeIsEditable(range)) return null;
+    var mark = document.createElement("span");
+    mark.setAttribute("data-daws-caret", "1");
+    try {
+      range.collapse(true);
+      range.insertNode(mark);
+    } catch (err) {
+      return null;
+    }
+    var after = document.createRange();
+    after.setStartAfter(mark);
+    after.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(after);
+    return mark;
+  }
+
+  function restoreCaretMark() {
+    var mark = document.querySelector("#vditor [data-daws-caret]");
+    if (!mark) return;
+    var range = document.createRange();
+    range.setStartAfter(mark);
+    range.collapse(true);
+    var sel = document.getSelection();
+    if (sel) {
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+    if (mark.parentNode) mark.parentNode.removeChild(mark);
+  }
+
   function restoreMathInClone(root) {
     if (!root || !root.querySelectorAll) return;
+    dropCaretMarks(root);
     restoreBreaksInClone(root);
     var i;
     var sourced = root.querySelectorAll("[data-daws-math-source]");
@@ -456,7 +580,11 @@
         if (typeof lute[method] !== "function") return;
         var orig = lute[method].bind(lute);
         lute[method] = function (html) {
-          return orig(htmlWithMathSources(html));
+          var out = orig(htmlWithMathSources(html));
+          if (method === "SpinVditorDOM" || method === "SpinVditorIRDOM") {
+            scheduleLeftoverMath();
+          }
+          return out;
         };
       })(names[i]);
     }
@@ -503,6 +631,7 @@
           output: "html",
           throwOnError: false,
           strict: false,
+          macros: katexMacros,
         });
       } else {
         math.textContent = parsed.tex;
@@ -821,6 +950,7 @@
   function renderLeftoverInlineMath(root) {
     var katex = window.katex;
     if (!root) return;
+    var skip = composing ? editingBlock() : null;
     if (!katex) {
       expandCellBreaks(root);
       return;
@@ -829,6 +959,7 @@
     if (root.tagName === "TR" || root.tagName === "TABLE") {
       var forcedCells = root.querySelectorAll(CELL_SELECTOR);
       for (var c = 0; c < forcedCells.length; c++) {
+        if (skip && (skip === forcedCells[c] || skip.contains(forcedCells[c]))) continue;
         renderMathInCell(forcedCells[c], katex);
       }
       expandCellBreaks(root);
@@ -837,9 +968,11 @@
     var cells = root.querySelectorAll(CELL_SELECTOR);
     var i;
     for (i = 0; i < cells.length; i++) {
+      if (skip && (skip === cells[i] || skip.contains(cells[i]))) continue;
       renderMathInCell(cells[i], katex);
     }
     var nodes = collectTextNodes(root, function (node) {
+      if (skip && skip.contains(node)) return NodeFilter.FILTER_REJECT;
       if (closestCell(node)) return NodeFilter.FILTER_REJECT;
       return acceptMathTextNode(node);
     });
@@ -850,12 +983,151 @@
   }
 
   function scheduleLeftoverMath() {
+    if (composing) return;
     window.clearTimeout(mathTimer);
     mathTimer = window.setTimeout(function () {
+      if (composing) return;
       ensureKatex(function () {
+        if (composing) return;
+        if (isSplitMode()) {
+          renderLeftoverInlineMath(document.getElementById("daws-preview"));
+          scheduleToc();
+          return;
+        }
+        var keep = hostActive || document.hasFocus();
+        if (keep) placeCaretMark();
         renderLeftoverInlineMath(document.getElementById("vditor"));
+        if (keep) restoreCaretMark();
+        scheduleToc();
       });
     }, MATH_DEBOUNCE_MS);
+  }
+
+  function headingLabel(el) {
+    var clone = el.cloneNode(true);
+    restoreMathInClone(clone);
+    return decodeTokensInText(clone.textContent || "")
+      .replace(/\$/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function headingLevel(el) {
+    var n = parseInt(String(el.tagName || "").slice(1), 10);
+    return n >= 1 && n <= 6 ? n : 1;
+  }
+
+  function collectHeadings() {
+    var root = document.getElementById("daws-preview") || document.querySelector("#vditor .vditor-reset");
+    if (!root) return [];
+    return Array.prototype.slice.call(root.querySelectorAll("h1, h2, h3, h4, h5, h6"));
+  }
+
+  function markTocButton() {
+    var btn = document.querySelector('#vditor .vditor-toolbar [data-type="toc"]');
+    if (!btn) return;
+    btn.classList.toggle("vditor-menu--current", outlineOpen);
+    btn.setAttribute("aria-pressed", outlineOpen ? "true" : "false");
+  }
+
+  function setOutlineOpen(on, persist) {
+    outlineOpen = !!on;
+    document.body.classList.toggle("daws-toc-open", outlineOpen);
+    var pane = document.getElementById("daws-toc");
+    if (pane) pane.hidden = !outlineOpen;
+    if (outlineOpen) rebuildToc();
+    markTocButton();
+    if (persist) {
+      vscode.postMessage({ type: "outline", payload: { show: outlineOpen } });
+    }
+  }
+
+  function rebuildToc() {
+    var list = document.getElementById("daws-toc-list");
+    if (!list) return;
+    var heads = collectHeadings();
+    if (!heads.length) {
+      list.innerHTML = '<p class="daws-toc-empty">没有标题</p>';
+      return;
+    }
+    var html = "";
+    var i;
+    for (i = 0; i < heads.length; i++) {
+      var id = heads[i].id || "daws-toc-h-" + i;
+      heads[i].id = id;
+      var label = headingLabel(heads[i]) || "无标题";
+      html +=
+        '<button type="button" class="daws-toc-item" data-level="' +
+        headingLevel(heads[i]) +
+        '" data-target="' +
+        id +
+        '">' +
+        escapeTocText(label) +
+        "</button>";
+    }
+    list.innerHTML = html;
+    highlightToc();
+  }
+
+  function escapeTocText(text) {
+    return String(text || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function scheduleToc() {
+    window.clearTimeout(tocTimer);
+    tocTimer = window.setTimeout(rebuildToc, 160);
+  }
+
+  function scrollRoot() {
+    return (
+      document.getElementById("daws-preview-pane") ||
+      document.querySelector("#vditor .vditor-wysiwyg, #vditor .vditor-ir, #vditor .vditor-content")
+    );
+  }
+
+  function highlightToc() {
+    var list = document.getElementById("daws-toc-list");
+    if (!list || !outlineOpen) return;
+    var heads = collectHeadings();
+    if (!heads.length) return;
+    var scroller = scrollRoot();
+    var top = scroller ? scroller.getBoundingClientRect().top + 28 : 28;
+    var current = heads[0];
+    var i;
+    for (i = 0; i < heads.length; i++) {
+      if (heads[i].getBoundingClientRect().top <= top) current = heads[i];
+    }
+    var items = list.querySelectorAll(".daws-toc-item");
+    for (i = 0; i < items.length; i++) {
+      items[i].classList.toggle("is-current", items[i].getAttribute("data-target") === current.id);
+    }
+  }
+
+  function bindToc() {
+    if (tocBound) return;
+    tocBound = true;
+    var close = document.getElementById("daws-toc-close");
+    if (close) {
+      close.addEventListener("click", function () {
+        setOutlineOpen(false, true);
+      });
+    }
+    var list = document.getElementById("daws-toc-list");
+    if (list) {
+      list.addEventListener("click", function (event) {
+        var btn = event.target && event.target.closest ? event.target.closest(".daws-toc-item") : null;
+        if (!btn) return;
+        var id = btn.getAttribute("data-target");
+        var el = id ? document.getElementById(id) : null;
+        if (el && el.scrollIntoView) el.scrollIntoView({ block: "start" });
+      });
+    }
+    var scroller = scrollRoot();
+    if (scroller) scroller.addEventListener("scroll", highlightToc, { passive: true });
   }
 
   function observeLeftoverMath() {
@@ -863,7 +1135,11 @@
     if (!root || mathObserved) return;
     mathObserved = true;
     bindTableMathEditing();
-    new MutationObserver(scheduleLeftoverMath).observe(root, {
+    new MutationObserver(function (mutations) {
+      if (isFrozen()) return;
+      if (!mutationsLookLikeMath(mutations)) return;
+      scheduleLeftoverMath();
+    }).observe(root, {
       childList: true,
       subtree: true,
       characterData: true,
@@ -1049,6 +1325,7 @@
     iconsObserved = true;
     paintVditorIcons();
     new MutationObserver(function (mutations) {
+      if (applyingRemote) return;
       for (var i = 0; i < mutations.length; i++) {
         var nodes = mutations[i].addedNodes || [];
         for (var j = 0; j < nodes.length; j++) {
@@ -1056,6 +1333,112 @@
         }
       }
     }).observe(document.documentElement, { childList: true, subtree: true });
+  }
+
+  function isFrozen() {
+    return applyingRemote || composing || Date.now() < composingGuardUntil;
+  }
+
+  function isSplitMode() {
+    return !!document.getElementById("daws-source");
+  }
+
+  function sourceEl() {
+    return document.getElementById("daws-source");
+  }
+
+  function eventOnSource(event) {
+    var t = event && event.target;
+    if (!t) return false;
+    if (t.id === "daws-source") return true;
+    return !!(t.closest && t.closest("#daws-source"));
+  }
+
+  function canSave() {
+    var ready = isSplitMode() ? !!sourceEl() : !!editor;
+    return !isFrozen() && ready && (hostActive || document.hasFocus());
+  }
+
+  function bindIme() {
+    if (imeBound) return;
+    imeBound = true;
+    document.addEventListener(
+      "compositionstart",
+      function () {
+        composing = true;
+        window.clearTimeout(saveTimer);
+        window.clearTimeout(mathTimer);
+      },
+      true,
+    );
+    document.addEventListener(
+      "compositionend",
+      function () {
+        composing = false;
+        composingGuardUntil = Date.now() + REMOTE_SETTLE_MS;
+        window.setTimeout(function () {
+          if (isFrozen()) return;
+          if (canSave()) scheduleSave();
+          if (isSplitMode()) schedulePreviewNeed();
+          if (pendingUpdate != null) {
+            var queued = pendingUpdate;
+            pendingUpdate = null;
+            if (isSplitMode()) {
+              applySplitUpdate(typeof queued === "string" ? { content: queued } : queued);
+            } else {
+              applyUpdate(typeof queued === "string" ? queued : queued.content);
+            }
+          }
+          scheduleLeftoverMath();
+        }, REMOTE_SETTLE_MS + 10);
+      },
+      true,
+    );
+  }
+
+  function editingBlock() {
+    var sel = document.getSelection();
+    if (!sel || sel.rangeCount === 0) return null;
+    var node = sel.anchorNode;
+    var el = node && node.nodeType === 1 ? node : node && node.parentElement;
+    return el && el.closest ? el.closest("p, li, h1, h2, h3, h4, h5, h6, td, th, blockquote") : null;
+  }
+
+  function mutationsLookLikeMath(mutations) {
+    var i;
+    var j;
+    for (i = 0; i < mutations.length; i++) {
+      var mutation = mutations[i];
+      if (mutation.type === "characterData") {
+        var text = mutation.target && mutation.target.nodeValue;
+        if (text && (text.indexOf("$") !== -1 || hasMathPlaceholder(text) || text.indexOf(BR_TOKEN) !== -1)) {
+          return true;
+        }
+        continue;
+      }
+      var nodes = mutation.addedNodes || [];
+      for (j = 0; j < nodes.length; j++) {
+        var node = nodes[j];
+        if (!node) continue;
+        if (node.nodeType === 3) {
+          var value = node.nodeValue || "";
+          if (value.indexOf("$") !== -1 || hasMathPlaceholder(value) || value.indexOf(BR_TOKEN) !== -1) {
+            return true;
+          }
+          continue;
+        }
+        if (node.nodeType !== 1) continue;
+        if (node.matches && node.matches("[data-daws-caret]")) continue;
+        if (node.matches && node.matches("[data-leftover-math][data-math-source]")) {
+          return true;
+        }
+        var sample = node.textContent || "";
+        if (sample.indexOf("$") !== -1 || hasMathPlaceholder(sample) || sample.indexOf(BR_TOKEN) !== -1) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   function applyChrome(config) {
@@ -1072,18 +1455,25 @@
     if (config.fontFamily) {
       document.documentElement.style.setProperty("--daws-font-family-editor", config.fontFamily);
     }
+    if (typeof config.showOutline === "boolean") {
+      setOutlineOpen(config.showOutline, false);
+    }
   }
 
   function scheduleSave() {
-    if (applyingRemote || !editor) return;
-    hookLuteSerializers();
+    if (!canSave()) return;
     window.clearTimeout(saveTimer);
     saveTimer = window.setTimeout(function () {
-      if (applyingRemote || !editor) return;
-      hookLuteSerializers();
-      var content = withSerializableDom(function () {
-        return editor.getValue();
-      });
+      if (!canSave()) return;
+      var content;
+      if (isSplitMode()) {
+        content = getFullMarkdown();
+      } else {
+        hookLuteSerializers();
+        content = withSerializableDom(function () {
+          return editor.getValue();
+        });
+      }
       if (contentsEqual(content, lastSynced)) return;
       lastSynced = normalizeMarkdown(content);
       vscode.postMessage({ type: "save", payload: { content: content } });
@@ -1093,6 +1483,10 @@
   function applyUpdate(content) {
     if (content == null) return;
     if (!editor) {
+      pendingUpdate = content;
+      return;
+    }
+    if (composing) {
       pendingUpdate = content;
       return;
     }
@@ -1110,7 +1504,13 @@
       applyingRemote = false;
       rewriteAllImages(document.getElementById("vditor"));
       scheduleLeftoverMath();
-    }, 0);
+      scheduleToc();
+      if (pendingUpdate != null && !contentsEqual(pendingUpdate, lastSynced)) {
+        var queued = pendingUpdate;
+        pendingUpdate = null;
+        applyUpdate(queued);
+      }
+    }, REMOTE_SETTLE_MS);
   }
 
   function getVditorCtor() {
@@ -1131,7 +1531,7 @@
     lastSynced = normalizeMarkdown(content);
     var cdn = resolveVditorCdn(payload, config);
     vditorCdn = cdn;
-    var macros = (config && config.markdown && config.markdown.math && config.markdown.math.macros) || {};
+    assignKatexMacros(config && config.markdown && config.markdown.math && config.markdown.math.macros);
     var options = {
       value: content,
       height: "100%",
@@ -1143,6 +1543,7 @@
       hint: { parse: false, extend: [] },
       toolbar: TOOLBAR,
       toolbarConfig: { pin: true },
+      undoDelay: 400,
       icon: "ant",
       link: { isOpen: false },
       preview: {
@@ -1152,14 +1553,18 @@
         math: {
           engine: "KaTeX",
           inlineDigit: true,
-          macros: macros,
+          macros: katexMacros,
         },
       },
       input: function () {
+        if (!canSave()) return;
         scheduleSave();
+        scheduleToc();
       },
       after: function () {
         hookLuteSerializers();
+        bindIme();
+        bindToc();
         bindTableMathEditing();
         observeIcons();
         paintVditorIcons();
@@ -1171,6 +1576,7 @@
         observeImages();
         rewriteAllImages(document.getElementById("vditor"));
         bindLinkFollow();
+        setOutlineOpen(outlineOpen, false);
         if (pendingUpdate != null) {
           var queued = pendingUpdate;
           pendingUpdate = null;
@@ -1198,31 +1604,102 @@
     return sel.toString();
   }
 
-  function insertMarkdownAtCaret(text) {
-    var value = normalizePastedMath(String(text || ""));
-    if (!value) {
-      notifyEditorChanged();
+  function editorSurface() {
+    return document.querySelector("#vditor .vditor-reset") || document.getElementById("vditor");
+  }
+
+  function frozenMathHost(node) {
+    var el = node && node.nodeType === 1 ? node : node && node.parentElement;
+    if (!el || !el.closest) return null;
+    return el.closest(
+      "[contenteditable='false'], .katex, .vditor-wysiwyg__preview, [data-type='math-inline'], [data-type='math-block'], [data-leftover-math]",
+    );
+  }
+
+  function rangeIsEditable(range) {
+    if (!range) return false;
+    var host = frozenMathHost(range.startContainer) || frozenMathHost(range.endContainer);
+    return !host;
+  }
+
+  function placeCaretAfter(node) {
+    if (!node || !node.parentNode) return false;
+    var sel = document.getSelection();
+    if (!sel) return false;
+    var next = document.createRange();
+    next.setStartAfter(node);
+    next.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(next);
+    return true;
+  }
+
+  function escapeFrozenMathRange() {
+    var sel = document.getSelection();
+    if (!sel || sel.rangeCount === 0) return;
+    var range = sel.getRangeAt(0);
+    var host = frozenMathHost(range.startContainer) || frozenMathHost(range.endContainer);
+    if (!host) return;
+    var wrap =
+      (host.closest && host.closest("[data-type='math-inline'], [data-type='math-block'], [data-leftover-math]")) || host;
+    placeCaretAfter(wrap);
+  }
+
+  function ensureEditableCaret() {
+    var root = editorSurface();
+    if (root && typeof root.focus === "function") {
+      try {
+        root.focus();
+      } catch (err) {
+        /* keep */
+      }
+    }
+    escapeFrozenMathRange();
+    var sel = document.getSelection();
+    if (sel && sel.rangeCount && root && root.contains(sel.getRangeAt(0).startContainer) && rangeIsEditable(sel.getRangeAt(0))) {
       return;
     }
+    if (!root) return;
+    var last = root.lastElementChild || root;
+    var fallback = document.createRange();
+    fallback.selectNodeContents(last);
+    fallback.collapse(false);
+    if (sel) {
+      sel.removeAllRanges();
+      sel.addRange(fallback);
+    }
+  }
+
+  function claimPaste() {
+    var now = Date.now();
+    if (now - lastPasteAt < 80) return false;
+    lastPasteAt = now;
+    return true;
+  }
+
+  function insertMarkdownAtCaret(text) {
+    var value = normalizePastedMath(String(text || ""));
+    if (!value) return;
+    ensureEditableCaret();
     var sel = document.getSelection();
-    if (!sel || sel.rangeCount === 0) {
-      document.execCommand("insertText", false, value);
+    if (sel && sel.rangeCount && rangeIsEditable(sel.getRangeAt(0))) {
+      var range = sel.getRangeAt(0);
+      if (!sel.isCollapsed) range.deleteContents();
+      var frag = fragmentFromMathText(value, window.katex);
+      var last = frag.lastChild;
+      range.insertNode(frag);
+      if (last && last.parentNode) placeCaretAfter(last);
       notifyEditorChanged();
       scheduleLeftoverMath();
       return;
     }
-    var range = sel.getRangeAt(0);
-    range.deleteContents();
-    var frag = fragmentFromMathText(value, window.katex);
-    var last = frag.lastChild;
-    range.insertNode(frag);
-    if (last && last.parentNode) {
-      var after = document.createRange();
-      after.setStartAfter(last);
-      after.collapse(true);
-      sel.removeAllRanges();
-      sel.addRange(after);
+    if (editor && typeof editor.insertMD === "function") {
+      editor.insertMD(value);
+      notifyEditorChanged();
+      scheduleLeftoverMath();
+      return;
     }
+    document.execCommand("insertText", false, value);
     notifyEditorChanged();
     scheduleLeftoverMath();
   }
@@ -1251,16 +1728,43 @@
   }
 
   function runClipboard(action, text) {
-    if (action === "paste") {
-      if (typeof text === "string") {
-        insertMarkdownAtCaret(text);
-      } else {
-        notifyEditorChanged();
+    var ta = sourceEl();
+    if (ta && document.activeElement === ta) {
+      if (action === "paste") {
+        if (!claimPaste()) return;
+        var pasted = typeof text === "string" && text ? text : lastCopiedText;
+        ta.setRangeText(normalizePastedMath(pasted), ta.selectionStart, ta.selectionEnd, "end");
+        syncFullFromDisplay();
+        scheduleSave();
+        schedulePreviewNeed();
+        return;
+      }
+      if (hasActiveFolds()) {
+        lastCopiedText = sourceCopyText(ta);
+        if (!lastCopiedText && action === "cut") return;
+        vscode.postMessage({ type: "clipboardWrite", payload: { text: lastCopiedText } });
+        if (action === "cut" && lastCopiedText) deleteFullRangeForDisplaySelection(ta);
+        return;
+      }
+      if (ta.selectionStart === ta.selectionEnd && action === "cut") return;
+      lastCopiedText = ta.value.slice(ta.selectionStart, ta.selectionEnd);
+      vscode.postMessage({ type: "clipboardWrite", payload: { text: lastCopiedText } });
+      if (action === "cut") {
+        ta.setRangeText("", ta.selectionStart, ta.selectionEnd, "end");
+        syncFullFromDisplay();
+        scheduleSave();
+        schedulePreviewNeed();
       }
       return;
     }
+    if (action === "paste") {
+      if (!claimPaste()) return;
+      insertMarkdownAtCaret(typeof text === "string" && text ? text : lastCopiedText);
+      return;
+    }
     if (selectionIsCollapsed() && action === "cut") return;
-    vscode.postMessage({ type: "clipboardWrite", payload: { text: selectedPlainText() } });
+    lastCopiedText = selectedPlainText();
+    vscode.postMessage({ type: "clipboardWrite", payload: { text: lastCopiedText } });
     if (action === "cut") {
       deleteSelection();
       notifyEditorChanged();
@@ -1280,10 +1784,15 @@
   document.addEventListener(
     "copy",
     function (event) {
+      if (eventOnSource(event)) {
+        writeSourceClipboard(event, false);
+        return;
+      }
       var text = selectedPlainText();
       if (!text || !event.clipboardData) return;
       event.preventDefault();
       event.stopPropagation();
+      lastCopiedText = text;
       event.clipboardData.setData("text/plain", text);
       vscode.postMessage({ type: "clipboardWrite", payload: { text: text } });
     },
@@ -1293,11 +1802,16 @@
   document.addEventListener(
     "cut",
     function (event) {
+      if (eventOnSource(event)) {
+        if (writeSourceClipboard(event, true)) return;
+        return;
+      }
       var text = selectedPlainText();
       if (!event.clipboardData) return;
       event.preventDefault();
       event.stopPropagation();
       if (text) {
+        lastCopiedText = text;
         event.clipboardData.setData("text/plain", text);
         vscode.postMessage({ type: "clipboardWrite", payload: { text: text } });
       }
@@ -1310,6 +1824,7 @@
   document.addEventListener(
     "paste",
     function (event) {
+      if (eventOnSource(event)) return;
       if (!event.clipboardData) return;
       var text = event.clipboardData.getData("text/plain");
       var html = event.clipboardData.getData("text/html");
@@ -1318,7 +1833,8 @@
       }
       event.preventDefault();
       event.stopPropagation();
-      insertMarkdownAtCaret(markdownFromClipboard(text, html));
+      if (!claimPaste()) return;
+      insertMarkdownAtCaret(markdownFromClipboard(text, html) || lastCopiedText);
     },
     true,
   );
@@ -1402,13 +1918,853 @@
     );
   }
 
+  function caretLine(ta) {
+    var pos = ta && ta.selectionStart != null ? ta.selectionStart : 0;
+    var text = ta ? ta.value.slice(0, pos) : "";
+    var n = 0;
+    var i;
+    for (i = 0; i < text.length; i++) {
+      if (text.charAt(i) === "\n") n += 1;
+    }
+    return n;
+  }
+
+  function displayLineAtPos(text, pos) {
+    var n = 0;
+    var i;
+    var lim = Math.min(pos, text.length);
+    for (i = 0; i < lim; i++) {
+      if (text.charAt(i) === "\n") n += 1;
+    }
+    return n;
+  }
+
+  function parseHeadings(text) {
+    var lines = String(text || "").split("\n");
+    var heads = [];
+    var seen = {};
+    var i;
+    for (i = 0; i < lines.length; i++) {
+      var m = /^(#{1,6})(?:[ \t]+|[ \t]*$)(.*)$/.exec(lines[i]);
+      if (!m) continue;
+      var level = m[1].length;
+      var title = String(m[2] || "")
+        .replace(/\s+#+\s*$/, "")
+        .replace(/\s+/g, " ")
+        .trim();
+      var base = level + "\t" + title;
+      seen[base] = (seen[base] || 0) + 1;
+      heads.push({
+        idx: heads.length,
+        line: i,
+        level: level,
+        title: title,
+        key: base + "\t" + seen[base],
+      });
+    }
+    return heads;
+  }
+
+  function headingRange(heads, idx, nlines) {
+    var end = nlines;
+    var lv = heads[idx].level;
+    var j;
+    for (j = idx + 1; j < heads.length; j++) {
+      if (heads[j].level <= lv) {
+        end = heads[j].line;
+        break;
+      }
+    }
+    return { start: heads[idx].line, end: end };
+  }
+
+  function headingByLine(heads, line) {
+    var i;
+    for (i = 0; i < heads.length; i++) {
+      if (heads[i].line === line) return heads[i];
+    }
+    return null;
+  }
+
+  function hasActiveFolds() {
+    var key;
+    for (key in foldKeys) {
+      if (foldKeys[key]) return true;
+    }
+    return false;
+  }
+
+  function rematchFoldKeys() {
+    var heads = parseHeadings(fullSource);
+    var next = {};
+    var i;
+    for (i = 0; i < heads.length; i++) {
+      if (foldKeys[heads[i].key]) next[heads[i].key] = true;
+    }
+    foldKeys = next;
+    lastHeads = heads;
+  }
+
+  function hiddenMask(text) {
+    var lines = String(text || "").split("\n");
+    var heads = parseHeadings(text);
+    var hide = new Uint8Array(lines.length);
+    var i;
+    var j;
+    var r;
+    for (i = 0; i < heads.length; i++) {
+      if (!foldKeys[heads[i].key]) continue;
+      r = headingRange(heads, i, lines.length);
+      for (j = r.start + 1; j < r.end; j++) hide[j] = 1;
+    }
+    return { lines: lines, heads: heads, hide: hide };
+  }
+
+  function buildDisplay() {
+    var mask = hiddenMask(fullSource);
+    var disp = [];
+    var map = [];
+    var i;
+    for (i = 0; i < mask.lines.length; i++) {
+      if (mask.hide[i]) continue;
+      disp.push(mask.lines[i]);
+      map.push(i);
+    }
+    dispToFull = map;
+    lastDispLines = disp.slice();
+    lastHeads = mask.heads;
+    return disp.join("\n");
+  }
+
+  function getFullMarkdown() {
+    var ta = sourceEl();
+    if (ta && !applyingFold && !composing && ta.value !== lastDispLines.join("\n")) {
+      syncFullFromDisplay();
+    }
+    return fullSource;
+  }
+
+  function syncFullFromDisplay() {
+    var ta = sourceEl();
+    if (!ta || applyingFold) return;
+    var newLines = ta.value.split("\n");
+    var oldDisp = lastDispLines;
+    var oldMap = dispToFull.slice();
+    var fullLines = fullSource.split("\n");
+    if (!oldMap.length && !fullSource) {
+      fullSource = ta.value;
+      lastDispLines = newLines.slice();
+      dispToFull = newLines.map(function (_line, i) {
+        return i;
+      });
+      rematchFoldKeys();
+      return;
+    }
+    if (newLines.length === oldDisp.length) {
+      var i;
+      for (i = 0; i < newLines.length; i++) {
+        if (newLines[i] !== oldDisp[i] && oldMap[i] != null) fullLines[oldMap[i]] = newLines[i];
+      }
+      fullSource = fullLines.join("\n");
+      lastDispLines = newLines.slice();
+      rematchFoldKeys();
+      return;
+    }
+    var i0 = 0;
+    while (i0 < oldDisp.length && i0 < newLines.length && oldDisp[i0] === newLines[i0]) i0 += 1;
+    var o1 = oldDisp.length - 1;
+    var n1 = newLines.length - 1;
+    while (o1 >= i0 && n1 >= i0 && oldDisp[o1] === newLines[n1]) {
+      o1 -= 1;
+      n1 -= 1;
+    }
+    var fullStart;
+    var fullEnd;
+    if (!oldMap.length) {
+      fullSource = newLines.join("\n");
+      lastDispLines = newLines.slice();
+      dispToFull = newLines.map(function (_line, i) {
+        return i;
+      });
+      rematchFoldKeys();
+      return;
+    }
+    if (i0 >= oldMap.length) {
+      fullStart = fullLines.length;
+      fullEnd = fullLines.length;
+    } else {
+      fullStart = oldMap[i0];
+      fullEnd = o1 >= i0 ? oldMap[o1] + 1 : fullStart;
+    }
+    var heads = parseHeadings(fullSource);
+    var d;
+    var h;
+    var r;
+    for (d = i0; d <= o1; d++) {
+      h = headingByLine(heads, oldMap[d]);
+      if (!h || !foldKeys[h.key]) continue;
+      r = headingRange(heads, h.idx, fullLines.length);
+      if (r.end > fullEnd) fullEnd = r.end;
+    }
+    var inserted = newLines.slice(i0, n1 + 1);
+    fullSource = fullLines.slice(0, fullStart).concat(inserted, fullLines.slice(fullEnd)).join("\n");
+    lastDispLines = newLines.slice();
+    rematchFoldKeys();
+    var next = buildDisplay();
+    if (!composing && ta.value !== next) {
+      applyingFold = true;
+      var pos = ta.selectionStart;
+      ta.value = next;
+      try {
+        ta.setSelectionRange(pos, pos);
+      } catch (err) {
+        /* keep */
+      }
+      applyingFold = false;
+    }
+  }
+
+  function caretFullLine(ta) {
+    var disp = caretLine(ta);
+    if (dispToFull[disp] != null) return dispToFull[disp];
+    return disp;
+  }
+
+  function refreshDisplay() {
+    var ta = sourceEl();
+    if (!ta) return;
+    var keep = caretFullLine(ta);
+    applyingFold = true;
+    ta.value = buildDisplay();
+    applyingFold = false;
+    jumpSourceToLine(keep, true);
+    paintGutter();
+  }
+
+  function toggleFoldKey(key) {
+    if (foldKeys[key]) delete foldKeys[key];
+    else foldKeys[key] = true;
+    refreshDisplay();
+  }
+
+  function foldLevels(minLevel, maxLevel) {
+    var heads = parseHeadings(fullSource);
+    var n = fullSource.split("\n").length;
+    var i;
+    var r;
+    for (i = 0; i < heads.length; i++) {
+      if (heads[i].level < minLevel || heads[i].level > maxLevel) continue;
+      r = headingRange(heads, i, n);
+      if (r.end > r.start + 1) foldKeys[heads[i].key] = true;
+    }
+    refreshDisplay();
+  }
+
+  function unfoldAll() {
+    foldKeys = {};
+    refreshDisplay();
+  }
+
+  function ensureLineVisible(fullLine) {
+    var heads = parseHeadings(fullSource);
+    var n = fullSource.split("\n").length;
+    var changed = false;
+    var i;
+    var r;
+    for (i = 0; i < heads.length; i++) {
+      if (!foldKeys[heads[i].key]) continue;
+      r = headingRange(heads, i, n);
+      if (fullLine > r.start && fullLine < r.end) {
+        delete foldKeys[heads[i].key];
+        changed = true;
+      }
+    }
+    if (!changed) return;
+    var ta = sourceEl();
+    applyingFold = true;
+    if (ta) ta.value = buildDisplay();
+    applyingFold = false;
+    paintGutter();
+  }
+
+  function selectHeadingSection(fullLine) {
+    var ta = sourceEl();
+    if (!ta) return;
+    var heads = parseHeadings(fullSource);
+    var h = headingByLine(heads, fullLine);
+    if (!h) return;
+    var r = headingRange(heads, h.idx, fullSource.split("\n").length);
+    var d0 = -1;
+    var d1 = -1;
+    var i;
+    for (i = 0; i < dispToFull.length; i++) {
+      if (dispToFull[i] >= r.start && dispToFull[i] < r.end) {
+        if (d0 < 0) d0 = i;
+        d1 = i;
+      }
+    }
+    if (d0 < 0) return;
+    var parts = ta.value.split("\n");
+    var start = 0;
+    for (i = 0; i < d0; i++) start += parts[i].length + 1;
+    var end = start;
+    for (i = d0; i <= d1; i++) end += parts[i].length + (i < d1 ? 1 : 0);
+    ta.focus();
+    ta.setSelectionRange(start, end);
+  }
+
+  function sourceCopyText(ta) {
+    var start = ta.selectionStart;
+    var end = ta.selectionEnd;
+    var lines = fullSource.split("\n");
+    var heads = parseHeadings(fullSource);
+    var a = displayLineAtPos(ta.value, start);
+    var fl = dispToFull[a];
+    var h;
+    var r;
+    if (start === end) {
+      h = headingByLine(heads, fl);
+      if (h && foldKeys[h.key]) {
+        r = headingRange(heads, h.idx, lines.length);
+        return lines.slice(r.start, r.end).join("\n");
+      }
+      return "";
+    }
+    var b = displayLineAtPos(ta.value, end);
+    if (end > start && ta.value.charAt(end - 1) === "\n") b -= 1;
+    var f0 = dispToFull[a];
+    var f1 = dispToFull[b];
+    if (f0 == null) f0 = 0;
+    if (f1 == null) f1 = f0;
+    if (f1 < f0) {
+      var tmp = f0;
+      f0 = f1;
+      f1 = tmp;
+    }
+    if (a === b) {
+      h = headingByLine(heads, f0);
+      if (h && foldKeys[h.key]) {
+        r = headingRange(heads, h.idx, lines.length);
+        return lines.slice(r.start, r.end).join("\n");
+      }
+    }
+    return lines.slice(f0, f1 + 1).join("\n");
+  }
+
+  function deleteFullRangeForDisplaySelection(ta) {
+    var start = ta.selectionStart;
+    var end = ta.selectionEnd;
+    var lines = fullSource.split("\n");
+    var heads = parseHeadings(fullSource);
+    var f0;
+    var f1;
+    var h;
+    var r;
+    var a = displayLineAtPos(ta.value, start);
+    if (start === end) {
+      h = headingByLine(heads, dispToFull[a]);
+      if (!h || !foldKeys[h.key]) return;
+      r = headingRange(heads, h.idx, lines.length);
+      f0 = r.start;
+      f1 = r.end;
+    } else {
+      var b = displayLineAtPos(ta.value, end);
+      if (end > start && ta.value.charAt(end - 1) === "\n") b -= 1;
+      f0 = dispToFull[a];
+      f1 = (dispToFull[b] != null ? dispToFull[b] : f0) + 1;
+      if (a === b) {
+        h = headingByLine(heads, f0);
+        if (h && foldKeys[h.key]) {
+          r = headingRange(heads, h.idx, lines.length);
+          f0 = r.start;
+          f1 = r.end;
+        }
+      }
+    }
+    if (f0 == null) return;
+    fullSource = lines.slice(0, f0).concat(lines.slice(f1)).join("\n");
+    rematchFoldKeys();
+    refreshDisplay();
+    scheduleSave();
+    schedulePreviewNeed();
+  }
+
+  function writeSourceClipboard(event, isCut) {
+    var ta = sourceEl();
+    if (!ta || !event.clipboardData) return false;
+    if (!hasActiveFolds()) return false;
+    var text = sourceCopyText(ta);
+    if (!text && ta.selectionStart === ta.selectionEnd) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    event.clipboardData.setData("text/plain", text);
+    lastCopiedText = text;
+    vscode.postMessage({ type: "clipboardWrite", payload: { text: text } });
+    if (isCut && text) deleteFullRangeForDisplaySelection(ta);
+    return true;
+  }
+
+  function blockIndexForLine(blocks, line) {
+    var found = 0;
+    var i;
+    for (i = 0; i < blocks.length; i++) {
+      if (blocks[i].start <= line) found = i;
+      if (blocks[i].start > line) break;
+    }
+    return found;
+  }
+
+  function previewElForLine(line) {
+    var root = document.getElementById("daws-preview");
+    if (!root) return null;
+    var nodes = root.querySelectorAll("[data-daws-line]");
+    var found = null;
+    var i;
+    for (i = 0; i < nodes.length; i++) {
+      var n = parseInt(nodes[i].getAttribute("data-daws-line"), 10);
+      if (!isNaN(n) && n <= line) found = nodes[i];
+      if (!isNaN(n) && n > line) break;
+    }
+    return found;
+  }
+
+  function flashLocate(el) {
+    var prev = document.querySelectorAll(".daws-locate");
+    var i;
+    for (i = 0; i < prev.length; i++) prev[i].classList.remove("daws-locate");
+    if (!el) return;
+    el.classList.add("daws-locate");
+    window.setTimeout(function () {
+      el.classList.remove("daws-locate");
+    }, 1200);
+  }
+
+  function lineHeightOf(ta) {
+    var styles = window.getComputedStyle(ta);
+    var lh = parseFloat(styles.lineHeight);
+    if (!lh || !isFinite(lh)) lh = (parseFloat(styles.fontSize) || 13) * 1.55;
+    return lh;
+  }
+
+  function sourceMeasureEl() {
+    return document.getElementById("daws-source-measure");
+  }
+
+  function syncSourceMeasure(ta) {
+    var el = sourceMeasureEl();
+    if (!el || !ta) return null;
+    var cs = window.getComputedStyle(ta);
+    el.style.font = cs.font;
+    el.style.fontFamily = cs.fontFamily;
+    el.style.fontSize = cs.fontSize;
+    el.style.fontWeight = cs.fontWeight;
+    el.style.letterSpacing = cs.letterSpacing;
+    el.style.lineHeight = cs.lineHeight;
+    el.style.tabSize = cs.tabSize || "2";
+    var padL = parseFloat(cs.paddingLeft) || 0;
+    var padR = parseFloat(cs.paddingRight) || 0;
+    el.style.width = Math.max(1, ta.clientWidth - padL - padR) + "px";
+    return el;
+  }
+
+  function visualRowsOfLine(measure, line, lh) {
+    if (!measure || !lh) return 1;
+    measure.textContent = line.length ? line : " ";
+    var rows = Math.round(measure.offsetHeight / lh);
+    return Math.max(1, rows);
+  }
+
+  function visualRowsBeforeLine(ta, line) {
+    var parts = ta.value.split("\n");
+    var measure = syncSourceMeasure(ta);
+    var lh = lineHeightOf(ta);
+    var rows = 0;
+    var i;
+    var last = Math.min(line, parts.length);
+    for (i = 0; i < last; i++) rows += visualRowsOfLine(measure, parts[i], lh);
+    return rows;
+  }
+
+  function jumpSourceToLine(line, caretOnly) {
+    var ta = sourceEl();
+    if (!ta) return;
+    ensureLineVisible(line);
+    var disp = 0;
+    var i;
+    for (i = 0; i < dispToFull.length; i++) {
+      if (dispToFull[i] <= line) disp = i;
+    }
+    var parts = ta.value.split("\n");
+    if (!parts.length) return;
+    if (disp < 0) disp = 0;
+    if (disp >= parts.length) disp = parts.length - 1;
+    var pos = 0;
+    for (i = 0; i < disp; i++) pos += parts[i].length + 1;
+    var end = caretOnly ? pos : pos + parts[disp].length;
+    ta.focus();
+    ta.setSelectionRange(pos, Math.max(pos, end));
+    var pad = parseFloat(window.getComputedStyle(ta).paddingTop) || 0;
+    ta.scrollTop = Math.max(0, pad + visualRowsBeforeLine(ta, disp) * lineHeightOf(ta) - ta.clientHeight / 3);
+    var gutter = document.getElementById("daws-source-gutter");
+    if (gutter) gutter.scrollTop = ta.scrollTop;
+  }
+
+  function paintGutter() {
+    var ta = sourceEl();
+    var gutter = document.getElementById("daws-source-gutter");
+    if (!ta || !gutter) return;
+    var parts = ta.value.split("\n");
+    var measure = syncSourceMeasure(ta);
+    var lh = lineHeightOf(ta);
+    var heads = lastHeads.length ? lastHeads : parseHeadings(fullSource);
+    var byLine = {};
+    var i;
+    for (i = 0; i < heads.length; i++) byLine[heads[i].line] = heads[i];
+    var nlines = (fullSource || ta.value).split("\n").length;
+    var html = "";
+    for (i = 0; i < parts.length; i++) {
+      var fl = dispToFull[i] != null ? dispToFull[i] : i;
+      var h = byLine[fl];
+      var rows = visualRowsOfLine(measure, parts[i], lh);
+      var fold = '<span class="daws-fold-btn" aria-hidden="true"></span>';
+      if (h) {
+        var r = headingRange(heads, h.idx, nlines);
+        if (r.end > r.start + 1) {
+          var on = !!foldKeys[h.key];
+          fold =
+            '<button type="button" class="daws-fold-btn' +
+            (on ? " is-folded" : "") +
+            '" data-fold-i="' +
+            h.idx +
+            '" title="' +
+            (on ? "展开本节" : "折叠本节") +
+            '">' +
+            (on ? "▶" : "▼") +
+            "</button>";
+        }
+      }
+      html +=
+        '<div class="daws-gutter-line" style="height:' +
+        rows * lh +
+        'px">' +
+        fold +
+        '<span class="daws-gutter-no" data-full-line="' +
+        fl +
+        '">' +
+        (fl + 1) +
+        "</span></div>";
+    }
+    gutter.innerHTML = html;
+    gutter.scrollTop = ta.scrollTop;
+  }
+
+  function stampPreview(root, blocks) {
+    if (!root) return;
+    var list = blocks || [];
+    var kids = [];
+    var i;
+    for (i = 0; i < root.children.length; i++) {
+      var el = root.children[i];
+      var tag = el.tagName;
+      if (tag === "SCRIPT" || tag === "STYLE" || tag === "LINK") continue;
+      kids.push(el);
+    }
+    for (i = 0; i < kids.length; i++) {
+      var block = list[i] || list[list.length - 1];
+      if (!block) continue;
+      kids[i].setAttribute("data-daws-line", String(block.start));
+      kids[i].setAttribute("data-daws-block", String(Math.min(i, Math.max(0, list.length - 1))));
+    }
+  }
+
+  function onPreviewClick(event) {
+    if (event.metaKey || event.ctrlKey || event.button !== 0) return;
+    var target = event.target;
+    var a = target && target.closest ? target.closest("a[href]") : null;
+    if (a) event.preventDefault();
+    var el = target && target.closest ? target.closest("[data-daws-line]") : null;
+    if (!el) return;
+    var line = parseInt(el.getAttribute("data-daws-line"), 10);
+    if (isNaN(line)) return;
+    locateLock = "preview";
+    jumpSourceToLine(line);
+    flashLocate(el);
+    window.setTimeout(function () {
+      if (locateLock === "preview") locateLock = "";
+    }, 240);
+  }
+
+  function scheduleLocatePreview() {
+    if (locateLock === "preview") return;
+    window.clearTimeout(locateTimer);
+    locateTimer = window.setTimeout(function () {
+      if (locateLock === "preview") return;
+      var ta = sourceEl();
+      if (!ta) return;
+      var line = caretFullLine(ta);
+      var el = previewElForLine(line);
+      if (!el) {
+        var idx = blockIndexForLine(sourceBlocks, line);
+        el = document.querySelector('#daws-preview [data-daws-block="' + idx + '"]');
+      }
+      if (!el) return;
+      locateLock = "source";
+      if (el.scrollIntoView) el.scrollIntoView({ block: "center" });
+      flashLocate(el);
+      window.setTimeout(function () {
+        if (locateLock === "source") locateLock = "";
+      }, 300);
+    }, 80);
+  }
+
+  function schedulePreviewNeed() {
+    if (!isSplitMode() || composing) return;
+    window.clearTimeout(previewTimer);
+    previewTimer = window.setTimeout(function () {
+      if (composing) return;
+      var ta = sourceEl();
+      if (!ta) return;
+      vscode.postMessage({ type: "previewNeed", payload: { content: getFullMarkdown() } });
+    }, SAVE_DEBOUNCE_MS);
+  }
+
+  function bindSplitBar() {
+    var bar = document.getElementById("daws-split-bar");
+    var split = document.getElementById("daws-split");
+    if (!bar || !split) return;
+    var dragging = false;
+    bar.addEventListener("mousedown", function (event) {
+      dragging = true;
+      document.body.classList.add("daws-resizing");
+      event.preventDefault();
+    });
+    document.addEventListener("mousemove", function (event) {
+      if (!dragging) return;
+      var rect = split.getBoundingClientRect();
+      if (!rect.width) return;
+      var pct = ((event.clientX - rect.left) / rect.width) * 100;
+      pct = Math.max(22, Math.min(78, pct));
+      document.documentElement.style.setProperty("--daws-source-width", pct + "%");
+    });
+    document.addEventListener("mouseup", function () {
+      if (!dragging) return;
+      dragging = false;
+      document.body.classList.remove("daws-resizing");
+      paintGutter();
+    });
+  }
+
+  function bindSplitChrome() {
+    if (splitBound) return;
+    splitBound = true;
+    var ta = sourceEl();
+    var gutter = document.getElementById("daws-source-gutter");
+    if (ta) {
+      ta.addEventListener("input", function () {
+        if (applyingFold) return;
+        syncFullFromDisplay();
+        paintGutter();
+        scheduleSave();
+        schedulePreviewNeed();
+      });
+      ta.addEventListener("scroll", function () {
+        if (gutter) gutter.scrollTop = ta.scrollTop;
+      });
+      ta.addEventListener("click", function () {
+        scheduleLocatePreview();
+      });
+      ta.addEventListener("keyup", function (event) {
+        if (event.key === "Process" || event.key === "Unidentified") return;
+        scheduleLocatePreview();
+      });
+      ta.addEventListener("keydown", function (event) {
+        if (event.key !== "Tab") return;
+        event.preventDefault();
+        ta.setRangeText("\t", ta.selectionStart, ta.selectionEnd, "end");
+        syncFullFromDisplay();
+        scheduleSave();
+      });
+      if (typeof ResizeObserver === "function") {
+        new ResizeObserver(function () {
+          paintGutter();
+        }).observe(ta);
+      } else {
+        window.addEventListener("resize", paintGutter);
+      }
+    }
+    var preview = document.getElementById("daws-preview");
+    if (preview) preview.addEventListener("click", onPreviewClick, true);
+    bindSplitBar();
+    var tocBtn = document.getElementById("daws-toc-btn");
+    if (tocBtn) {
+      tocBtn.addEventListener("click", function () {
+        setOutlineOpen(!outlineOpen, true);
+      });
+    }
+    var foldH1 = document.getElementById("daws-fold-h1");
+    if (foldH1) {
+      foldH1.addEventListener("click", function () {
+        foldLevels(1, 1);
+      });
+    }
+    var foldH2 = document.getElementById("daws-fold-h2");
+    if (foldH2) {
+      foldH2.addEventListener("click", function () {
+        foldLevels(2, 6);
+      });
+    }
+    var foldOpen = document.getElementById("daws-fold-open");
+    if (foldOpen) {
+      foldOpen.addEventListener("click", function () {
+        unfoldAll();
+      });
+    }
+    if (gutter && gutter.getAttribute("data-daws-fold") !== "1") {
+      gutter.setAttribute("data-daws-fold", "1");
+      gutter.addEventListener("click", function (event) {
+        var btn = event.target && event.target.closest ? event.target.closest(".daws-fold-btn[data-fold-i]") : null;
+        if (btn) {
+          event.preventDefault();
+          var idx = parseInt(btn.getAttribute("data-fold-i"), 10);
+          var heads = lastHeads.length ? lastHeads : parseHeadings(fullSource);
+          if (heads[idx]) toggleFoldKey(heads[idx].key);
+          return;
+        }
+        var num = event.target && event.target.closest ? event.target.closest(".daws-gutter-no") : null;
+        if (!num) return;
+        var fl = parseInt(num.getAttribute("data-full-line"), 10);
+        if (!isNaN(fl)) selectHeadingSection(fl);
+      });
+    }
+    var pane = document.getElementById("daws-preview-pane");
+    if (pane) pane.addEventListener("scroll", highlightToc, { passive: true });
+  }
+
+  function renderSplitPreview(payload) {
+    var preview = document.getElementById("daws-preview");
+    var VditorCtor = getVditorCtor();
+    if (!preview || !VditorCtor || typeof VditorCtor.preview !== "function") return;
+    var md =
+      payload && payload.previewContent != null
+        ? payload.previewContent
+        : payload && payload.content != null
+          ? payload.content
+          : "";
+    sourceBlocks = (payload && payload.blocks) || sourceBlocks || [];
+    if (md === lastPreviewMd && preview.getAttribute("data-daws-stamped") === "1") {
+      stampPreview(preview, sourceBlocks);
+      return;
+    }
+    lastPreviewMd = md;
+    var seq = (previewSeq += 1);
+    var theme = resolveVditorTheme(editorThemeSetting);
+    var cdn = vditorCdn.replace(/\/$/, "");
+    var options = {
+      mode: theme === "dark" ? "dark" : "light",
+      lang: mapLang(null),
+      icon: "ant",
+      hljs: { style: theme === "dark" ? "github-dark" : "github" },
+      math: {
+        engine: "KaTeX",
+        inlineDigit: true,
+        macros: katexMacros,
+      },
+      markdown: {
+        sanitize: false,
+        toc: false,
+        footnotes: true,
+        linkBase: documentBaseUrl || "",
+      },
+      after: function () {
+        if (seq !== previewSeq) return;
+        preview.setAttribute("data-daws-stamped", "1");
+        stampPreview(preview, sourceBlocks);
+        rewriteAllImages(preview);
+        ensureKatex(function () {
+          renderLeftoverInlineMath(preview);
+        });
+        scheduleToc();
+      },
+    };
+    if (cdn) {
+      options.cdn = cdn;
+      options.theme = {
+        current: theme === "dark" ? "dark" : "light",
+        path: cdn + "/dist/css/content-theme",
+      };
+    }
+    preview.removeAttribute("data-daws-stamped");
+    var job = VditorCtor.preview(preview, md, options);
+    if (job && typeof job.catch === "function") {
+      job.catch(function () {
+        if (seq !== previewSeq) return;
+        preview.textContent = (payload && payload.content) || md;
+      });
+    }
+  }
+
+  function applySplitUpdate(payload) {
+    var content = payload && payload.content != null ? payload.content : "";
+    if (composing) {
+      pendingUpdate = payload;
+      return;
+    }
+    var ta = sourceEl();
+    if (ta && !contentsEqual(fullSource, content) && document.activeElement !== ta) {
+      applyingRemote = true;
+      fullSource = normalizeMarkdown(content);
+      rematchFoldKeys();
+      applyingFold = true;
+      ta.value = buildDisplay();
+      applyingFold = false;
+      lastSynced = normalizeMarkdown(content);
+      paintGutter();
+      window.setTimeout(function () {
+        applyingRemote = false;
+      }, REMOTE_SETTLE_MS);
+    }
+    renderSplitPreview(payload);
+  }
+
+  function handleSplitOpen(payload) {
+    var content = payload && payload.content != null ? payload.content : "";
+    var config = (payload && payload.config) || {};
+    editorThemeSetting = config.editorTheme || editorThemeSetting;
+    mermaidThemeSetting = config.mermaidTheme || mermaidThemeSetting;
+    vditorCdn = resolveVditorCdn(payload, config);
+    assignKatexMacros(config.markdown && config.markdown.math && config.markdown.math.macros);
+    applyContentChrome(editorThemeSetting);
+    lastSynced = normalizeMarkdown(content);
+    fullSource = normalizeMarkdown(content);
+    rematchFoldKeys();
+    var ta = sourceEl();
+    if (ta && !composing) {
+      applyingFold = true;
+      ta.value = buildDisplay();
+      applyingFold = false;
+    }
+    var name = document.getElementById("daws-file-name");
+    if (name) name.textContent = documentFileName || "";
+    bindSplitChrome();
+    bindToc();
+    bindLinkFollow();
+    observeImages();
+    paintGutter();
+    renderSplitPreview(payload);
+  }
+
   function handleOpen(payload) {
     var content = payload && payload.content != null ? payload.content : "";
     var config = (payload && payload.config) || {};
+    assignKatexMacros(config.markdown && config.markdown.math && config.markdown.math.macros);
     documentBaseUrl = (payload && payload.documentBaseUrl) || "";
     workspaceBaseUrl = (payload && payload.workspaceBaseUrl) || "";
     documentFileName = (payload && payload.fileName) || "";
     applyChrome(config);
+    if (isSplitMode()) {
+      handleSplitOpen(payload);
+      return;
+    }
     if (editor) {
       editorThemeSetting = config.editorTheme || editorThemeSetting;
       mermaidThemeSetting = config.mermaidTheme || mermaidThemeSetting;
@@ -1416,6 +2772,7 @@
       applyUpdate(content);
       rewriteAllImages(document.getElementById("vditor"));
       bindLinkFollow();
+      scheduleToc();
       return;
     }
     initVditor(content, config, payload);
@@ -1429,11 +2786,27 @@
       return;
     }
     if (msg.type === "update") {
-      applyUpdate(payload.content);
+      if (isSplitMode()) applySplitUpdate(payload);
+      else applyUpdate(payload.content);
+      return;
+    }
+    if (msg.type === "preview") {
+      if (isSplitMode()) renderSplitPreview(payload);
       return;
     }
     if (msg.type === "clipboard") {
       runClipboard(payload.action, payload.text);
+      return;
+    }
+    if (msg.type === "outline") {
+      var action = payload && payload.action;
+      if (action === "show") setOutlineOpen(true, true);
+      else if (action === "hide") setOutlineOpen(false, true);
+      else setOutlineOpen(!outlineOpen, true);
+      return;
+    }
+    if (msg.type === "hostFocus") {
+      hostActive = !!(payload && payload.active);
     }
   });
 
@@ -1443,6 +2816,7 @@
   }).observe(document.body, { attributes: true, attributeFilter: ["class"] });
 
   window.renderLeftoverInlineMath = renderLeftoverInlineMath;
+  bindIme();
   observeMermaidHook();
   vscode.postMessage({ type: "ready" });
 })();

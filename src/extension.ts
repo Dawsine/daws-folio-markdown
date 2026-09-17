@@ -1,11 +1,17 @@
 import * as vscode from 'vscode';
-import { MarkdownEditorProvider, VIEW_TYPE } from './markdownEditorProvider';
+import { VIEW_TYPE } from './constants';
+import { MarkdownEditorProvider } from './markdownEditorProvider';
+import { isFolioTab, isMarkdownPath } from './splitView';
 
 export function activate(context: vscode.ExtensionContext): void {
+	void vscode.commands.executeCommand('setContext', 'hasCustomMarkdownPreview', true);
 	context.subscriptions.push(MarkdownEditorProvider.register(context));
 	context.subscriptions.push(
 		vscode.commands.registerCommand('dawsFolioMarkdown.switchEditor', (uri?: vscode.Uri) =>
 			switchMarkdownEditor(uri),
+		),
+		vscode.commands.registerCommand('dawsFolioMarkdown.openPreviewToTheSide', (uri?: vscode.Uri) =>
+			openPreviewToTheSide(uri),
 		),
 	);
 }
@@ -14,30 +20,55 @@ export function deactivate(): void {
 	// 无全局资源需要释放。
 }
 
-function isMarkdownUri(uri: vscode.Uri): boolean {
-	return /\.(md|markdown)$/i.test(uri.path);
-}
-
-async function switchMarkdownEditor(uri?: vscode.Uri): Promise<void> {
-	const tab = vscode.window.tabGroups.activeTabGroup.activeTab;
-	const input = tab?.input;
-
-	if (input instanceof vscode.TabInputCustom && input.viewType === VIEW_TYPE) {
-		await vscode.commands.executeCommand('vscode.openWith', uri ?? input.uri, 'default');
-		return;
+function resolveTarget(uri?: vscode.Uri): vscode.Uri | undefined {
+	if (uri && isMarkdownPath(uri.path)) {
+		return uri;
 	}
 
+	const tab = vscode.window.tabGroups.activeTabGroup.activeTab;
+	const input = tab?.input;
 	const fromCustom = input instanceof vscode.TabInputCustom ? input.uri : undefined;
 	const fromTextTab = input instanceof vscode.TabInputText ? input.uri : undefined;
 	const fromEditor = vscode.window.activeTextEditor?.document.uri;
-	const target = uri ?? fromTextTab ?? fromCustom ?? fromEditor;
+	const target = fromTextTab ?? fromCustom ?? fromEditor;
+	if (!target || !isMarkdownPath(target.path)) {
+		return undefined;
+	}
+	return target;
+}
 
-	if (!target || !isMarkdownUri(target)) {
+async function openPreviewToTheSide(uri?: vscode.Uri): Promise<void> {
+	const target = resolveTarget(uri);
+	if (!target) {
+		void vscode.window.showInformationMessage('请先打开 Markdown 文件后再打开预览。');
+		return;
+	}
+	await vscode.workspace.openTextDocument(target);
+	await vscode.commands.executeCommand('vscode.openWith', target, VIEW_TYPE, {
+		preserveFocus: false,
+		preview: false,
+	});
+}
+
+async function switchMarkdownEditor(uri?: vscode.Uri): Promise<void> {
+	const target = resolveTarget(uri);
+	if (!target) {
 		void vscode.window.showInformationMessage('请先打开 Markdown 文件后再切换编辑器。');
 		return;
 	}
 
-	const document = await vscode.workspace.openTextDocument(target);
-	await vscode.window.showTextDocument(document, { preview: false, preserveFocus: true });
-	await vscode.commands.executeCommand('vscode.openWith', document.uri, VIEW_TYPE);
+	const active = vscode.window.tabGroups.activeTabGroup.activeTab;
+	if (isFolioTab(active, target)) {
+		await vscode.commands.executeCommand('vscode.openWith', target, 'default', {
+			preserveFocus: false,
+			preview: false,
+		});
+		return;
+	}
+
+	await vscode.workspace.openTextDocument(target);
+	await vscode.commands.executeCommand('vscode.openWith', target, VIEW_TYPE, {
+		preserveFocus: false,
+		preview: false,
+	});
 }

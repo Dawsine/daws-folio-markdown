@@ -1,24 +1,38 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { EXTENSION_VERSION, VIEW_TYPE } from './constants';
 import { isBlockedLink, isExternalLink, splitLinkHref } from './linkHref';
+import { asStringMacroMap } from './mathMacros';
+import { mapMarkdownBlocks } from './sourceMap';
 import { protectMathInTables, restoreMathInTables } from './tableMath';
 
-export const VIEW_TYPE = 'dawsine.folioMarkdown';
+export { VIEW_TYPE } from './constants';
 
 interface EditorConfig {
 	editMode: string;
 	editorTheme: string;
 	mermaidTheme: string;
+	showOutline: boolean;
 	language: string;
 	fontSize: number;
 	fontFamily: string;
+	markdown: {
+		math: {
+			macros: Record<string, string>;
+		};
+	};
+}
+
+interface PreviewPayload {
+	content: string;
+	previewContent: string;
+	blocks: ReturnType<typeof mapMarkdownBlocks>;
 }
 
 interface HostToWebviewOpen {
 	type: 'open';
-	payload: {
-		content: string;
+	payload: PreviewPayload & {
 		config: EditorConfig;
 		fileName: string;
 		documentBaseUrl: string;
@@ -28,13 +42,13 @@ interface HostToWebviewOpen {
 
 interface HostToWebviewUpdate {
 	type: 'update';
-	payload: {
-		content: string;
-	};
+	payload: PreviewPayload;
 }
 
 export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
 	private readonly lastPosted = new Map<string, string>();
+	private readonly writing = new Set<string>();
+	private readonly previewTimers = new Map<string, ReturnType<typeof setTimeout>>();
 	private readonly panels = new Set<vscode.WebviewPanel>();
 	private focused: vscode.WebviewPanel | undefined;
 
@@ -50,6 +64,7 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
 			vscode.commands.registerCommand('dawsFolioMarkdown.cut', () => provider.sendClipboard('cut')),
 			vscode.commands.registerCommand('dawsFolioMarkdown.copy', () => provider.sendClipboard('copy')),
 			vscode.commands.registerCommand('dawsFolioMarkdown.paste', () => provider.sendClipboard('paste')),
+			vscode.commands.registerCommand('dawsFolioMarkdown.toggleOutline', () => provider.sendOutline('toggle')),
 		);
 	}
 
@@ -74,19 +89,22 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
 			if (event.document.uri.toString() !== docKey) {
 				return;
 			}
-			const content = protectMathInTables(event.document.getText());
-			if (this.lastPosted.get(docKey) === content) {
+			const raw = event.document.getText();
+			if (this.writing.has(docKey)) {
+				this.lastPosted.set(docKey, raw);
 				return;
 			}
-			this.lastPosted.set(docKey, content);
-			const message: HostToWebviewUpdate = { type: 'update', payload: { content } };
-			void webviewPanel.webview.postMessage(message);
+			if (this.lastPosted.get(docKey) === raw) {
+				return;
+			}
+			this.schedulePreviewUpdate(webviewPanel.webview, docKey, document);
 		});
 
 		const messageSub = webviewPanel.webview.onDidReceiveMessage((message: unknown) => {
 			const type = readMessageType(message);
 			if (type === 'ready' || type === 'init') {
 				this.postOpen(webviewPanel.webview, document);
+				this.postHostFocus(webviewPanel);
 				return;
 			}
 			if (type === 'save') {
@@ -95,6 +113,17 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
 					return;
 				}
 				void this.writeDocument(document, raw);
+				return;
+			}
+			if (type === 'previewNeed') {
+				const raw = readSaveContent(message);
+				if (typeof raw !== 'string') {
+					return;
+				}
+				void webviewPanel.webview.postMessage({
+					type: 'preview',
+					payload: this.previewPayload(raw),
+				});
 				return;
 			}
 			if (type === 'clipboardWrite') {
@@ -110,11 +139,24 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
 			}
 			if (type === 'openLink') {
 				void this.openLink(document, readHref(message));
+				return;
+			}
+			if (type === 'outline') {
+				const show = readOutlineShow(message);
+				if (typeof show === 'boolean') {
+					void vscode.workspace
+						.getConfiguration('dawsFolioMarkdown')
+						.update('showOutline', show, vscode.ConfigurationTarget.Global);
+				}
 			}
 		});
 
 		const configSub = vscode.workspace.onDidChangeConfiguration((event) => {
-			if (!event.affectsConfiguration('editor.fontSize') && !event.affectsConfiguration('editor.fontFamily')) {
+			if (
+				!event.affectsConfiguration('editor.fontSize') &&
+				!event.affectsConfiguration('editor.fontFamily') &&
+				!event.affectsConfiguration('dawsFolioMarkdown')
+			) {
 				return;
 			}
 			this.postOpen(webviewPanel.webview, document);
@@ -122,9 +164,16 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
 
 		const stateSub = webviewPanel.onDidChangeViewState(() => {
 			this.rememberFocus(webviewPanel);
+			this.postHostFocus(webviewPanel);
 		});
+		this.postHostFocus(webviewPanel);
 
 		webviewPanel.onDidDispose(() => {
+			const timer = this.previewTimers.get(docKey);
+			if (timer) {
+				clearTimeout(timer);
+				this.previewTimers.delete(docKey);
+			}
 			changeSub.dispose();
 			messageSub.dispose();
 			configSub.dispose();
@@ -134,8 +183,51 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
 				this.focused = undefined;
 			}
 			this.lastPosted.delete(docKey);
+			this.writing.delete(docKey);
 			this.refreshFocusContext();
 		});
+	}
+
+	private previewPayload(raw: string): PreviewPayload {
+		return {
+			content: raw,
+			previewContent: protectMathInTables(raw),
+			blocks: mapMarkdownBlocks(raw),
+		};
+	}
+
+	private postHostFocus(panel: vscode.WebviewPanel): void {
+		void panel.webview.postMessage({
+			type: 'hostFocus',
+			payload: { active: panel.active },
+		});
+	}
+
+	private schedulePreviewUpdate(
+		webview: vscode.Webview,
+		docKey: string,
+		document: vscode.TextDocument,
+	): void {
+		const existing = this.previewTimers.get(docKey);
+		if (existing) {
+			clearTimeout(existing);
+		}
+		this.previewTimers.set(
+			docKey,
+			setTimeout(() => {
+				this.previewTimers.delete(docKey);
+				if (this.writing.has(docKey)) {
+					return;
+				}
+				const raw = document.getText();
+				if (this.lastPosted.get(docKey) === raw) {
+					return;
+				}
+				this.lastPosted.set(docKey, raw);
+				const message: HostToWebviewUpdate = { type: 'update', payload: this.previewPayload(raw) };
+				void webview.postMessage(message);
+			}, 400),
+		);
 	}
 
 	private rememberFocus(panel: vscode.WebviewPanel): void {
@@ -201,6 +293,13 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
 		await vscode.commands.executeCommand('vscode.open', target);
 	}
 
+	public sendOutline(action: 'toggle' | 'show' | 'hide', webview = this.targetWebview()): void {
+		if (!webview) {
+			return;
+		}
+		void webview.postMessage({ type: 'outline', payload: { action } });
+	}
+
 	public async sendClipboard(action: 'cut' | 'copy' | 'paste', webview = this.targetWebview()): Promise<void> {
 		if (!webview) {
 			return;
@@ -210,12 +309,12 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
 	}
 
 	private postOpen(webview: vscode.Webview, document: vscode.TextDocument): void {
-		const content = protectMathInTables(document.getText());
-		this.lastPosted.set(document.uri.toString(), content);
+		const raw = document.getText();
+		this.lastPosted.set(document.uri.toString(), raw);
 		const message: HostToWebviewOpen = {
 			type: 'open',
 			payload: {
-				content,
+				...this.previewPayload(raw),
 				config: this.readEditorConfig(),
 				fileName: path.basename(document.uri.path),
 				documentBaseUrl: this.toWebviewDir(webview, vscode.Uri.joinPath(document.uri, '..')),
@@ -248,31 +347,46 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
 
 	private async writeDocument(document: vscode.TextDocument, markdown: string): Promise<void> {
 		const restored = restoreMathInTables(markdown);
+		const docKey = document.uri.toString();
 		if (document.getText() === restored) {
-			this.lastPosted.set(document.uri.toString(), protectMathInTables(restored));
+			this.lastPosted.set(docKey, restored);
 			return;
 		}
 
-		this.lastPosted.set(document.uri.toString(), protectMathInTables(restored));
-		const edit = new vscode.WorkspaceEdit();
-		edit.replace(
-			document.uri,
-			new vscode.Range(document.positionAt(0), document.positionAt(document.getText().length)),
-			restored,
-		);
-		await vscode.workspace.applyEdit(edit);
+		this.writing.add(docKey);
+		this.lastPosted.set(docKey, restored);
+		try {
+			const edit = new vscode.WorkspaceEdit();
+			edit.replace(
+				document.uri,
+				new vscode.Range(document.positionAt(0), document.positionAt(document.getText().length)),
+				restored,
+			);
+			await vscode.workspace.applyEdit(edit);
+		} finally {
+			this.writing.delete(docKey);
+		}
 	}
 
 	private readEditorConfig(): EditorConfig {
 		const cfg = vscode.workspace.getConfiguration('dawsFolioMarkdown');
 		const editor = vscode.workspace.getConfiguration('editor');
+		const userMacros = asStringMacroMap(
+			vscode.workspace.getConfiguration('markdown.math').get('macros'),
+		);
 		return {
 			editMode: cfg.get<string>('editMode', 'wysiwyg'),
 			editorTheme: cfg.get<string>('editorTheme', 'Newsprint'),
 			mermaidTheme: cfg.get<string>('mermaidTheme', 'Forest'),
+			showOutline: cfg.get<boolean>('showOutline', true),
 			language: vscode.env.language,
 			fontSize: editor.get<number>('fontSize', 14),
 			fontFamily: editor.get<string>('fontFamily', 'JetBrains Mono'),
+			markdown: {
+				math: {
+					macros: userMacros,
+				},
+			},
 		};
 	}
 
@@ -282,6 +396,12 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
 		const htmlPath = vscode.Uri.joinPath(mediaDir, 'editor.html');
 		const vditorCss = webview.asWebviewUri(vscode.Uri.joinPath(vditorDir, 'dist', 'index.css')).toString();
 		const vditorJs = webview.asWebviewUri(vscode.Uri.joinPath(vditorDir, 'dist', 'index.js')).toString();
+		const vditorLute = webview
+			.asWebviewUri(vscode.Uri.joinPath(vditorDir, 'dist', 'js', 'lute', 'lute.min.js'))
+			.toString();
+		const vditorI18n = webview
+			.asWebviewUri(vscode.Uri.joinPath(vditorDir, 'dist', 'js', 'i18n', 'zh_CN.js'))
+			.toString();
 		const vditorIcons = webview
 			.asWebviewUri(vscode.Uri.joinPath(vditorDir, 'dist', 'js', 'icons', 'ant.js'))
 			.toString();
@@ -294,8 +414,14 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
 		const katexJs = webview
 			.asWebviewUri(vscode.Uri.joinPath(vditorDir, 'dist', 'js', 'katex', 'katex.min.js'))
 			.toString();
-		const editorCss = cacheBust(webview.asWebviewUri(vscode.Uri.joinPath(mediaDir, 'editor.css')).toString(), '0.1.15');
-		const scriptUri = cacheBust(webview.asWebviewUri(vscode.Uri.joinPath(mediaDir, 'editor.js')).toString(), '0.1.15');
+		const editorCss = cacheBust(
+			webview.asWebviewUri(vscode.Uri.joinPath(mediaDir, 'editor.css')).toString(),
+			EXTENSION_VERSION,
+		);
+		const scriptUri = cacheBust(
+			webview.asWebviewUri(vscode.Uri.joinPath(mediaDir, 'editor.js')).toString(),
+			EXTENSION_VERSION,
+		);
 		const mediaRoot = webview.asWebviewUri(mediaDir).toString();
 		const vditorRoot = webview.asWebviewUri(vditorDir).toString();
 		const cspSource = webview.cspSource;
@@ -332,6 +458,8 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
 			.replaceAll('{{cspSource}}', cspSource)
 			.replaceAll('{{VDITOR_CSS}}', vditorCss)
 			.replaceAll('{{VDITOR_JS}}', vditorJs)
+			.replaceAll('{{VDITOR_LUTE}}', vditorLute)
+			.replaceAll('{{VDITOR_I18N}}', vditorI18n)
 			.replaceAll('{{VDITOR_ICONS}}', vditorIcons)
 			.replaceAll('{{VDITOR_MERMAID}}', vditorMermaid)
 			.replaceAll('{{KATEX_CSS}}', katexCss)
@@ -385,6 +513,21 @@ function readHref(message: unknown): string | undefined {
 	}
 	if (typeof record.href === 'string') {
 		return record.href;
+	}
+	return undefined;
+}
+
+function readOutlineShow(message: unknown): boolean | undefined {
+	const record = asRecord(message);
+	if (!record) {
+		return undefined;
+	}
+	const payload = asRecord(record.payload);
+	if (typeof payload?.show === 'boolean') {
+		return payload.show;
+	}
+	if (typeof record.show === 'boolean') {
+		return record.show;
 	}
 	return undefined;
 }

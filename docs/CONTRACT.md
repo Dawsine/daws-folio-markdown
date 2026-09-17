@@ -10,13 +10,17 @@
 ## 要对齐的行为（Markdown only）
 
 - Custom Editor，`viewType`：`dawsine.folioMarkdown`
-- 打开 `*.md` / `*.markdown`（file / vscode-vfs / vscode-remote）
-- 默认 WYSIWYG，可切 `ir`（即时渲染）
+- 打开 `*.md` / `*.markdown`（file / vscode-vfs / vscode-remote）时默认一个 Folio 窗口：左源码（textarea）、右 `Vditor.preview`
+- 点击预览块跳到源码行；点击或移动源码光标跳到对应预览块
+- `dawsFolioMarkdown.automaticallyShowPreview` 已废弃，不再打开 Cursor 左右标签栏
+- git / 对比仍走文本编辑器
+- Markdown 预览默认走 Folio：`hasCustomMarkdownPreview`、`Cmd+Shift+V` / `Alt+M`、标题栏按钮；不走自带预览或 MPE
 - KaTeX：`$...$`、`$$...$$`，`inlineDigit: true`
 - Mermaid 围栏代码块
 - GFM 表格可点选编辑
 - 大纲、主题 Auto/亮/暗、代码块高亮
-- 改文档通过 `CustomDocument` 走 VS Code 未保存脏位；`input` 防抖写回
+- 改文档通过 `CustomDocument` 走 VS Code 未保存脏位；Folio 聚焦时才写回，源码侧改动防抖预览
+- 输入法 `composition` 期间不保存、不重绘 leftover 公式、不 `setValue`
 - 图片粘贴：把二进制交给扩展宿主，写到可配置路径再插链接
 
 明确不做：Word/Excel/PPT/PDF/Epub、Pro 付费、AI 润色、PDF 导出、遥测。
@@ -47,9 +51,11 @@ Office Viewer / Vditor / Lute 会在**整行**上配对 `$`，再按 `|` 切表�
 宿主与 webview 消息（两边都要实现）：
 
 ```
-host → webview: { type: 'open', payload: { content, config, fileName } }
-host → webview: { type: 'update', payload: { content } }
+host → webview: { type: 'open', payload: { content, previewContent, blocks, config, fileName } }
+host → webview: { type: 'update', payload: { content, previewContent, blocks } }
+host → webview: { type: 'preview', payload: { content, previewContent, blocks } }
 webview → host: { type: 'save', payload: { content } }   // 还原公式后的 Markdown
+webview → host: { type: 'previewNeed', payload: { content } }
 webview → host: { type: 'ready' }
 ```
 

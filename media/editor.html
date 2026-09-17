@@ -11,6 +11,8 @@
 
       {{VDITOR_CSS}}   → node_modules/vditor/dist/index.css
       {{VDITOR_JS}}    → node_modules/vditor/dist/index.js
+      {{VDITOR_LUTE}}  → node_modules/vditor/dist/js/lute/lute.min.js
+      {{VDITOR_I18N}}  → node_modules/vditor/dist/js/i18n/zh_CN.js
       {{VDITOR_ICONS}}   → node_modules/vditor/dist/js/icons/ant.js
       {{VDITOR_MERMAID}} → node_modules/vditor/dist/js/mermaid/mermaid.min.js
       {{KATEX_CSS}}      → node_modules/vditor/dist/js/katex/katex.min.css
@@ -26,10 +28,42 @@
   <link rel="stylesheet" href="{{EDITOR_CSS}}" />
 </head>
 <body>
+  <script src="{{VDITOR_LUTE}}" id="vditorLuteScript"></script>
+  <script src="{{VDITOR_I18N}}" id="vditorI18nScriptzh_CN"></script>
   <script src="{{VDITOR_ICONS}}" id="vditorIconScript"></script>
   <script src="{{VDITOR_MERMAID}}" id="vditorMermaidScript"></script>
   <script src="{{KATEX_JS}}" id="vditorKatexScript"></script>
-  <div id="vditor"></div>
+  <div id="daws-shell">
+    <aside id="daws-toc" hidden>
+      <div class="daws-toc-head">
+        <span>目录</span>
+        <button type="button" id="daws-toc-close" title="关闭目录">×</button>
+      </div>
+      <nav id="daws-toc-list"></nav>
+    </aside>
+    <div id="daws-main">
+      <div id="daws-toolbar">
+        <button type="button" id="daws-toc-btn" class="daws-tool-btn" title="目录">目录</button>
+        <button type="button" id="daws-fold-h1" class="daws-tool-btn" title="折叠各章">折叠章</button>
+        <button type="button" id="daws-fold-h2" class="daws-tool-btn" title="折叠各节">折叠节</button>
+        <button type="button" id="daws-fold-open" class="daws-tool-btn" title="展开全部标题">展开</button>
+        <span id="daws-file-name"></span>
+      </div>
+      <div id="daws-split">
+        <section id="daws-source-pane">
+          <div id="daws-source-gutter" aria-hidden="true"></div>
+          <textarea id="daws-source" spellcheck="false" wrap="soft" autocomplete="off"></textarea>
+          <div id="daws-source-measure" aria-hidden="true"></div>
+        </section>
+        <div id="daws-split-bar" role="separator" aria-orientation="vertical"></div>
+        <section id="daws-preview-pane">
+          <div id="vditor">
+            <div id="daws-preview"></div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
   <script src="{{VDITOR_JS}}"></script>
   <script src="{{EDITOR_JS}}"></script>
 </body>

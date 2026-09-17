@@ -1,0 +1,5 @@
+DawsMathds is a subset of STIX Two Math (codepoints U+1D7D8–U+1D7E1),
+renamed so the reserved name “STIX Two” is not reused.
+
+STIX Two Math: Copyright 2001–2021 STI Pub Companies.
+Licensed under the SIL Open Font License 1.1; see OFL.txt.

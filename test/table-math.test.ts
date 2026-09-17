@@ -5,6 +5,7 @@ import {
   protectBreaksInCell,
   protectMathInTables,
   restoreMathInTables,
+  separateAdjacentMath,
   stripLeakedKatexMath,
 } from "../src/tableMath.ts";
 
@@ -169,5 +170,21 @@ describe("stripLeakedKatexMath", () => {
     const restored = restoreMathInTables(leaked);
     assert.equal(restored.includes("<span"), false);
     assert.match(restored, /空位谱 \$C_\{V_n\}\$/);
+  });
+});
+
+describe("separateAdjacentMath", () => {
+  it("splits $$Y$$$$\\Pi$ so KaTeX is not in math mode at the next $", () => {
+    const raw = "$$Y_{\\mathrm{calc}}=\\Pi$$$\\Pi$ 是观测";
+    const out = separateAdjacentMath(raw);
+    assert.equal(out.includes("$$$"), false);
+    assert.equal(out, "$$\nY_{\\mathrm{calc}}=\\Pi\n$$\n\n$\\Pi$ 是观测");
+  });
+
+  it("does not touch mermaid fences", () => {
+    const raw = "```mermaid\nA-->B$$\n```\n$$M_1$$后文";
+    const out = separateAdjacentMath(raw);
+    assert.match(out, /```mermaid\nA-->B\$\$\n```/);
+    assert.match(out, /\$\$\nM_1\n\$\$\n\n后文/);
   });
 });
