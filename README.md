@@ -97,7 +97,7 @@ Prefix: `dawsFolioMarkdown.*`
 npm install
 npm run compile
 npx @vscode/vsce package
-cursor --install-extension ./daws-folio-markdown-0.1.29.vsix --force
+cursor --install-extension ./daws-folio-markdown-0.1.30.vsix --force
 ```
 
 `npm run watch` while developing. Table-math tests: `npm test`.
